@@ -294,6 +294,16 @@ if os.path.exists(assets_path):
     app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
     logger.info(f"静态资源已挂载: {assets_path}")
 
+    # 根路径重定向到主页面
+    @app.get("/")
+    async def serve_main_page():
+        from fastapi.responses import FileResponse
+        index_path = os.path.join(assets_path, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content="<h1>AI 语音绘图工具</h1><p>请访问 <a href='/assets/index.html'>/assets/index.html</a></p>")
+
 # OpenAI 兼容接口处理器
 openai_handler = OpenAIChatHandler(service)
 
