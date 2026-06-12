@@ -1,0 +1,99 @@
+{
+  "timestamp": "2026-06-12 10:33:30",
+  "total": 15,
+  "passed": 15,
+  "failed": 0,
+  "pass_rate": "100.0%",
+  "results": [
+    {
+      "name": "绘制圆形-中央",
+      "input": "画一个红色的圆在正中间",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "绘制矩形-左上角",
+      "input": "在左上角画一个蓝色的矩形",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "绘制直线-对角线",
+      "input": "从左上到右下画一条绿色粗线",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "绘制三角形-填充",
+      "input": "画一个紫色三角形，填充为黄色",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "绘制椭圆",
+      "input": "画一个粉色椭圆在右侧",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "添加文字",
+      "input": "在顶部写上'Hello'用蓝色",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "复合指令-三步",
+      "input": "画一个红色的圆在中间，然后在左上角画一个蓝色矩形，再画一条绿色线从左上到右下",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "复合指令-清空后绘制",
+      "input": "清空画布，然后画一个紫色的圆在正中间",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "设置颜色",
+      "input": "把画笔颜色改成绿色",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "设置线宽",
+      "input": "线条加粗到10",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "设置背景色",
+      "input": "把背景改成浅蓝色",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "口语-画个圈",
+      "input": "画个圈",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "口语-画个方块",
+      "input": "画个方块在右上角",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "口语-画条线",
+      "input": "画条红线",
+      "passed": true,
+      "error": ""
+    },
+    {
+      "name": "口语-撤销",
+      "input": "撤销上一步",
+      "passed": true,
+      "error": ""
+    }
+  ]
+}

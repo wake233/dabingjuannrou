@@ -286,6 +286,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# 静态文件挂载 - Canvas 画布页面和前端资源
+from fastapi.staticfiles import StaticFiles
+import os
+assets_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+if os.path.exists(assets_path):
+    app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+    logger.info(f"静态资源已挂载: {assets_path}")
+
 # OpenAI 兼容接口处理器
 openai_handler = OpenAIChatHandler(service)
 
