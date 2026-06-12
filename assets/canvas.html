@@ -195,15 +195,15 @@
     <div id="welcome-overlay">
       <div class="mic-icon">🎤</div>
       <div class="welcome-text">
-        对我说 <strong>"画一个红色的圆"</strong><br>
-        或 <strong>"在左上角画一个蓝色矩形"</strong><br>
+        对我说 <strong>"画一个太阳"</strong><br>
+        或 <strong>"画一个阳台，阳台上放一张桌子"</strong><br>
         即可开始创作 🎨
       </div>
     </div>
   </div>
 
   <!-- 底部操作提示 -->
-  <div id="action-hint">💡 对我说出绘图的指令，例如"画一个红色的圆在正中间"</div>
+  <div id="action-hint">💡 对我说出场景描述，例如"画一个太阳"或"画一个阳台放一张桌子"</div>
 </div>
 
 <script>
@@ -297,6 +297,9 @@
   let shapes = [];
   /** 撤销栈 */
   let undoStack = [];
+
+  /** ========== 场景计数器：记录当前场景中已执行的指令数 ========== */
+  let sceneCommandIndex = 0;
   /** 当前绘图颜色 */
   let currentColor = '#333333';
   /** 当前填充颜色 */
@@ -585,6 +588,64 @@
   }
 
   /* ============================================================
+   *  5.1 新协议渲染引擎 (operate/args 格式)
+   *     兼容 scene 场景拆解指令格式
+   * ============================================================ */
+
+  /**
+   * 将 operate/args 格式转为内部 type/params 格式并执行
+   * 支持: circle, rect, line, clear
+   */
+  function executeOperateCmd(cmd) {
+    const op = cmd.operate;
+    const args = cmd.args || [];
+
+    switch (op) {
+      case 'circle': {
+        const [x, y, r, fillColor, strokeColor, lineWidth] = args;
+        return executeCommand({
+          type: 'draw_circle',
+          params: {
+            cx: x, cy: y, r: r,
+            fill_color: fillColor || undefined,
+            color: strokeColor || currentColor,
+            line_width: lineWidth || currentLineWidth
+          }
+        });
+      }
+      case 'rect': {
+        const [x, y, w, h, fillColor, strokeColor, lineWidth] = args;
+        return executeCommand({
+          type: 'draw_rectangle',
+          params: {
+            x, y, w, h,
+            fill_color: fillColor || undefined,
+            color: strokeColor || currentColor,
+            line_width: lineWidth || currentLineWidth
+          }
+        });
+      }
+      case 'line': {
+        const [x1, y1, x2, y2, color, lineWidth] = args;
+        return executeCommand({
+          type: 'draw_line',
+          params: {
+            x1, y1, x2, y2,
+            color: color || currentColor,
+            line_width: lineWidth || currentLineWidth
+          }
+        });
+      }
+      case 'clear': {
+        return executeCommand({ type: 'clear', params: {} });
+      }
+      default: {
+        return { success: false, message: `不支持的操作类型: ${op}` };
+      }
+    }
+  }
+
+  /* ============================================================
    *  6. 批量执行指令 (支持复合指令)
    * ============================================================ */
 
@@ -594,13 +655,23 @@
     }
 
     const results = [];
-    for (const cmd of commands) {
-      const result = executeCommand(cmd);
+    for (let i = 0; i < commands.length; i++) {
+      const cmd = commands[i];
+      // 自动检测协议格式: operate/args (新) vs type/params (旧)
+      let result;
+      if (cmd.operate) {
+        result = executeOperateCmd(cmd);
+      } else {
+        result = executeCommand(cmd);
+      }
       results.push(result);
 
       // 如果不是最后一条，滚动更新状态
-      if (results.length < commands.length) {
-        updateHint(`✅ ${result.message} → 继续执行...`, true);
+      if (i < commands.length - 1) {
+        const stepInfo = cmd.operate
+          ? `执行步骤 ${i+1}/${commands.length}: ${cmd.operate}`
+          : `执行步骤 ${i+1}/${commands.length}: ${result.message}`;
+        updateHint(`⏳ ${stepInfo}`, true);
       }
     }
 
@@ -676,7 +747,33 @@
     }
 
     // 检查是否是绘图指令
-    if (!msg || msg.target !== 'ai-drawing-canvas' || !msg.command) return;
+    if (!msg || msg.target !== 'ai-drawing-canvas' || !msg.command) {
+      // 兼容模式：直接接收 JSON 数组（新协议 operate/args 格式）
+      if (Array.isArray(msg) && msg.length > 0 && msg[0].operate) {
+        // 更新提示
+        updateHint('⏳ 正在执行场景绘图指令...', true);
+        // 执行指令数组
+        const result = executeCommands(msg);
+        // 更新提示
+        updateHint(`✅ ${result.message}`, true);
+        // 3秒后恢复默认提示
+        setTimeout(() => {
+          updateHint('💡 对我说绘图的指令，例如"画一个太阳"或"画一个阳台，放一张桌子"', false);
+        }, 3000);
+        // 上报执行结果给父窗口
+        if (window.parent && window.parent !== window) {
+          const response = {
+            target: 'coze-canvas-response',
+            source: 'ai-drawing-canvas',
+            result: result
+          };
+          window.parent.postMessage(response, '*');
+        }
+        reportStatus('success', result.message, shapes.length);
+        return;
+      }
+      return;
+    }
 
     const command = msg.command;
 

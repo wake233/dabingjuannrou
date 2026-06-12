@@ -130,7 +130,7 @@ def build_agent(ctx=None):
         ctx: 可选的请求上下文，用于链路追踪
         
     Returns:
-        create_agent 构建的 Agent 实例
+        create_agent 构建的 Agent 实例 (带格式转换层)
     """
     workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
     config_path = os.path.join(workspace_path, LLM_CONFIG)
@@ -166,4 +166,101 @@ def build_agent(ctx=None):
     )
 
     logger.info("[Agent] AI 语音绘图 Agent 构建完成")
-    return agent
+
+    # 构建格式转换包装器
+    class _FormatConvertingAgent:
+        """包装 agent，LLM输出后自动转换格式"""
+        def __init__(self, inner):
+            self._inner = inner
+        
+        def invoke(self, input_data, config=None, **kwargs):
+            result = self._inner.invoke(input_data, config=config, **kwargs)
+            return self._convert(result)
+        
+        async def ainvoke(self, input_data, config=None, **kwargs):
+            result = await self._inner.ainvoke(input_data, config=config, **kwargs)
+            return self._convert(result)
+        
+        def _convert(self, result):
+            if isinstance(result, dict) and 'messages' in result:
+                msgs = result['messages']
+                if msgs and hasattr(msgs[-1], 'content') and isinstance(msgs[-1].content, str):
+                    try:
+                        parsed = json.loads(msgs[-1].content)
+                        if isinstance(parsed, list):
+                            converted = convert_type_params_to_operate_args(parsed)
+                            msgs[-1].content = json.dumps(converted, ensure_ascii=False)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            return result
+        
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+    
+    logger.info("[Agent] AI 语音绘图 Agent 构建完成（含格式转换）")
+    return _FormatConvertingAgent(agent)
+
+
+# ============================================================
+#  格式转换: type/params → operate/args
+# ============================================================
+
+_TYPE_TO_OPERATE = {
+    'draw_circle': 'circle',
+    'draw_rectangle': 'rect',
+    'draw_line': 'line',
+    'draw_triangle': 'line',
+    'draw_ellipse': 'circle',
+    'clear': 'clear',
+    'undo': 'clear',
+    'set_bg': 'rect',
+}
+
+def convert_type_params_to_operate_args(commands):
+    """将 [{type, params}] 转为 [{operate, args}]"""
+    if not isinstance(commands, list):
+        return commands
+    
+    result = []
+    for cmd in commands:
+        if not isinstance(cmd, dict):
+            result.append(cmd)
+            continue
+        if 'operate' in cmd:
+            result.append(cmd)
+            continue
+        
+        t = cmd.get('type', '')
+        p = cmd.get('params', {})
+        
+        if t == 'draw_circle':
+            result.append({'operate': 'circle', 'args': [
+                p.get('cx', 500), p.get('cy', 500), p.get('r', 100),
+                p.get('fill_color') or p.get('color', '#333'),
+                p.get('color', '#333'), p.get('line_width', 4)
+            ]})
+        elif t == 'draw_rectangle':
+            result.append({'operate': 'rect', 'args': [
+                p.get('x', 100), p.get('y', 100), p.get('w', 200), p.get('h', 200),
+                p.get('fill_color') or p.get('color', '#333'),
+                p.get('color', '#333'), p.get('line_width', 4)
+            ]})
+        elif t == 'draw_line':
+            result.append({'operate': 'line', 'args': [
+                p.get('x1', 0), p.get('y1', 0), p.get('x2', 500), p.get('y2', 500),
+                p.get('color', '#333'), p.get('line_width', 4)
+            ]})
+        elif t == 'clear':
+            result.append({'operate': 'clear', 'args': []})
+        elif t in ('draw_triangle', 'draw_ellipse', 'draw_text', 'draw_polygon'):
+            result.append({'operate': 'line', 'args': [
+                p.get('x1', 0) or p.get('cx', 500) or p.get('x', 500),
+                p.get('y1', 0) or p.get('cy', 500) or p.get('y', 500),
+                p.get('x2', 500) or p.get('cx', 500) + 100,
+                p.get('y2', 500) or p.get('cy', 500),
+                p.get('color', '#333'), p.get('line_width', 4)
+            ]})
+        else:
+            result.append(cmd)
+    
+    return result

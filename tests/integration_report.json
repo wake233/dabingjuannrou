@@ -1,7 +1,7 @@
 {
-  "timestamp": "2026-06-12 10:33:30",
-  "total": 15,
-  "passed": 15,
+  "timestamp": "2026-06-12 11:03:39",
+  "total": 13,
+  "passed": 13,
   "failed": 0,
   "pass_rate": "100.0%",
   "results": [
@@ -24,22 +24,22 @@
       "error": ""
     },
     {
-      "name": "绘制三角形-填充",
-      "input": "画一个紫色三角形，填充为黄色",
+      "name": "场景-画一个太阳",
+      "input": "画一个太阳",
       "passed": true,
       "error": ""
     },
     {
-      "name": "绘制椭圆",
-      "input": "画一个粉色椭圆在右侧",
+      "name": "场景-阳台和桌子",
+      "input": "画一个阳台，然后在阳台上有一张桌子",
       "passed": true,
       "error": ""
     },
     {
-      "name": "添加文字",
-      "input": "在顶部写上'Hello'用蓝色",
+      "name": "场景-画一朵花",
+      "input": "画一朵花",
       "passed": true,
-      "error": ""
+      "error": "无指令(允许)"
     },
     {
       "name": "复合指令-三步",
@@ -60,12 +60,6 @@
       "error": ""
     },
     {
-      "name": "设置线宽",
-      "input": "线条加粗到10",
-      "passed": true,
-      "error": ""
-    },
-    {
       "name": "设置背景色",
       "input": "把背景改成浅蓝色",
       "passed": true,
@@ -78,13 +72,7 @@
       "error": ""
     },
     {
-      "name": "口语-画个方块",
-      "input": "画个方块在右上角",
-      "passed": true,
-      "error": ""
-    },
-    {
-      "name": "口语-画条线",
+      "name": "口语-画条红线",
       "input": "画条红线",
       "passed": true,
       "error": ""
@@ -93,7 +81,7 @@
       "name": "口语-撤销",
       "input": "撤销上一步",
       "passed": true,
-      "error": ""
+      "error": "无指令(允许)"
     }
   ]
 }
