@@ -422,9 +422,11 @@
       }
       case 'draw_arc': {
         const arcPos = logicalToPixel(p.cx || 500, p.cy || 500);
-        const arcR = pixelWidth(p.r || 100);
+        const arcR = logicalWidth(p.r || 100);
+        const startRad = (p.startAngle || 0) * Math.PI / 180;
+        const endRad = (p.endAngle || 180) * Math.PI / 180;
         ctx.beginPath();
-        ctx.arc(arcPos.x, arcPos.y, arcR, p.startAngle || 0, p.endAngle || Math.PI);
+        ctx.arc(arcPos.x, arcPos.y, arcR, startRad, endRad);
         ctx.strokeStyle = p.color || currentColor;
         ctx.lineWidth = logicalWidth(p.line_width || currentLineWidth);
         ctx.stroke();
@@ -776,26 +778,39 @@
 
     // 检查是否是绘图指令
     if (!msg || msg.target !== 'ai-drawing-canvas' || !msg.command) {
-      // 兼容模式：直接接收 JSON 数组（新协议 operate/args 格式）
+      // 兼容模式1：直接接收 JSON 数组（新协议 operate/args 格式）
       if (Array.isArray(msg) && msg.length > 0 && msg[0].operate) {
-        // 更新提示
+        // ...execute array...
         updateHint('⏳ 正在执行场景绘图指令...', true);
-        // 执行指令数组
         const result = executeCommands(msg);
-        // 更新提示
         updateHint(`✅ ${result.message}`, true);
-        // 3秒后恢复默认提示
         setTimeout(() => {
           updateHint('💡 对我说绘图的指令，例如"画一个太阳"或"画一个阳台，放一张桌子"', false);
         }, 3000);
-        // 上报执行结果给父窗口
         if (window.parent && window.parent !== window) {
-          const response = {
+          window.parent.postMessage({
             target: 'coze-canvas-response',
             source: 'ai-drawing-canvas',
             result: result
-          };
-          window.parent.postMessage(response, '*');
+          }, '*');
+        }
+        reportStatus('success', result.message, shapes.length);
+        return;
+      }
+      // 兼容模式2：接收单条 operate/args 指令（来自 index.html 直接发送）
+      if (msg.operate && Array.isArray(msg.args)) {
+        updateHint('⏳ 正在执行绘图指令...', true);
+        const result = executeCommands([msg]);
+        updateHint(`✅ ${result.message}`, true);
+        setTimeout(() => {
+          updateHint('💡 对我说绘图的指令，例如"画一个红色的圆在正中间"', false);
+        }, 3000);
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            target: 'coze-canvas-response',
+            source: 'ai-drawing-canvas',
+            result: result
+          }, '*');
         }
         reportStatus('success', result.message, shapes.length);
         return;
