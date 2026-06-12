@@ -2,313 +2,355 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI 语音绘图工具</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>🎨 AI 语音绘图 - 纯语音控制</title>
 <style>
-  /* === Reset & Base === */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
+  html, body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: #f5f6f8; color: #333; height: 100vh; overflow: hidden;
+    background: #0d0e12; color: #e8eaed; height: 100vh; overflow: hidden;
+    user-select: none; -webkit-user-select: none; -moz-user-select: none;
+    cursor: default;
   }
+  /* 完全禁用键盘输入 */
+  *:focus { outline: none !important; }
+  input, textarea, [contenteditable] { display: none !important; }
 
-  /* === Layout === */
-  .app-container {
-    display: flex; flex-direction: column; height: 100vh; max-width: 1400px;
-    margin: 0 auto; background: #f5f6f8;
+  /* === 主布局 === */
+  .app {
+    display: flex; flex-direction: column; height: 100vh;
+    max-width: 1400px; margin: 0 auto;
   }
+  /* 顶部标题栏 */
+  .header {
+    display: flex; align-items: center; justify-content: center;
+    padding: 12px 20px; background: #1a1b23; border-bottom: 1px solid #2a2b35;
+    flex-shrink: 0;
+  }
+  .header h1 {
+    font-size: 18px; font-weight: 600; letter-spacing: 1px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .header .voice-indicator {
+    margin-left: 12px; font-size: 12px; color: #9aa0a6;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .header .indicator-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #34a853;
+    display: inline-block; animation: pulse-dot 2s infinite;
+  }
+  @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
-  /* === Top Bar === */
-  .top-bar {
-    display: flex; align-items: center; gap: 12px;
-    padding: 12px 24px; background: #fff;
-    border-bottom: 1px solid #e8eaed; flex-shrink: 0;
-  }
-  .top-bar .logo { font-size: 18px; font-weight: 700; color: #1a73e8; white-space: nowrap; }
-  .top-bar .logo span { color: #333; }
-  .top-bar .top-input-wrap {
-    flex: 1; display: flex; gap: 8px;
-    background: #f0f2f5; border-radius: 24px; padding: 4px;
-    border: 1px solid transparent; transition: all 0.2s;
-  }
-  .top-bar .top-input-wrap:focus-within { background: #fff; border-color: #1a73e8; }
-  .top-bar .top-input-wrap input {
-    flex: 1; border: none; outline: none; background: transparent;
-    padding: 8px 16px; font-size: 14px; color: #333;
-  }
-  .top-bar .top-input-wrap input::placeholder { color: #999; }
-  .top-bar .btn {
-    padding: 6px 18px; border: none; border-radius: 20px;
-    font-size: 13px; cursor: pointer; transition: all 0.2s; white-space: nowrap;
-  }
-  .top-bar .btn-primary { background: #1a73e8; color: #fff; }
-  .top-bar .btn-primary:hover { background: #1557b0; }
-  .top-bar .btn-icon {
-    width: 34px; height: 34px; border-radius: 50%; display: inline-flex;
-    align-items: center; justify-content: center; background: #f0f2f5;
-    border: none; cursor: pointer; font-size: 18px; transition: all 0.2s;
-  }
-  .top-bar .btn-icon:hover { background: #e0e3e8; }
-  .top-bar .btn-icon.recording { background: #ea4335; color: #fff; animation: pulse 1s infinite; }
-  @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
-
-  /* === Main Content === */
+  /* === 主体内容：对话+画布 === */
   .main-content {
-    flex: 1; display: flex; overflow: hidden; gap: 0;
+    display: flex; flex: 1; min-height: 0;
   }
-
-  /* === Chat Panel (Left) === */
   .chat-panel {
-    width: 420px; min-width: 320px; display: flex; flex-direction: column;
-    background: #fff; border-right: 1px solid #e8eaed;
+    width: 340px; min-width: 280px; display: flex; flex-direction: column;
+    background: #13141b; border-right: 1px solid #2a2b35;
   }
-  .chat-header {
-    padding: 14px 20px; font-size: 14px; font-weight: 600;
-    color: #555; border-bottom: 1px solid #f0f2f5;
-    display: flex; align-items: center; gap: 8px;
-  }
-  .chat-header .badge {
-    font-size: 11px; background: #e8f0fe; color: #1a73e8;
-    padding: 2px 10px; border-radius: 10px; font-weight: 400;
+  .chat-panel .panel-title {
+    padding: 10px 16px; font-size: 12px; color: #9aa0a6; 
+    border-bottom: 1px solid #1e1f28; flex-shrink: 0;
+    text-transform: uppercase; letter-spacing: 2px;
   }
   .chat-messages {
-    flex: 1; overflow-y: auto; padding: 16px 16px 8px;
+    flex: 1; overflow-y: auto; padding: 12px;
   }
   .chat-messages::-webkit-scrollbar { width: 4px; }
-  .chat-messages::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+  .chat-messages::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
 
-  /* === Message Bubbles === */
-  .message { margin-bottom: 16px; display: flex; gap: 10px; }
-  .message.user { flex-direction: row-reverse; }
+  /* 对话气泡 */
+  .message {
+    margin-bottom: 12px; animation: msgIn 0.3s ease;
+  }
+  @keyframes msgIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+  
+  .message .msg-header {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+  }
   .message .avatar {
-    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+    width: 28px; height: 28px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    font-size: 14px; font-weight: 600; color: #fff;
+    font-size: 14px; flex-shrink: 0;
   }
-  .message.assistant .avatar { background: #1a73e8; }
-  .message.user .avatar { background: #34a853; }
+  .message.user .avatar { background: #1a73e8; }
+  .message.assistant .avatar { background: linear-gradient(135deg, #667eea, #764ba2); }
+  .message .role { font-size: 12px; color: #9aa0a6; }
+  .message .time { font-size: 10px; color: #5f6368; margin-left: auto; }
+
   .message .bubble {
-    max-width: 80%; padding: 10px 14px; border-radius: 12px;
-    font-size: 14px; line-height: 1.6; word-break: break-word;
+    margin-left: 36px; padding: 8px 12px; border-radius: 8px;
+    font-size: 13px; line-height: 1.5; word-break: break-word;
+    background: #1e1f28; border: 1px solid #2a2b35;
   }
-  .message.assistant .bubble {
-    background: #f0f2f5; border-top-left-radius: 4px;
-  }
-  .message.user .bubble {
-    background: #e8f0fe; color: #1a73e8; border-top-right-radius: 4px;
-  }
-  .message .bubble .sender-name {
-    font-size: 12px; color: #1a73e8; font-weight: 500; margin-bottom: 4px;
-  }
-  .message.user .bubble .sender-name { color: #34a853; text-align: right; }
+  .message.assistant .bubble { border-left: 3px solid #667eea; }
+  .message.user .bubble { border-left: 3px solid #1a73e8; background: #1a1d28; }
 
-  /* === Status indicator === */
-  .thinking-indicator {
-    display: none; padding: 8px 16px; color: #888;
-    font-size: 13px; align-items: center; gap: 8px;
+  .message .bubble.error { border-left-color: #ea4335; color: #f28b82; }
+  .message .bubble .block-title {
+    font-size: 11px; color: #9aa0a6; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 4px;
   }
+  .message .bubble .code-block {
+    background: #0d0e12; border-radius: 4px; padding: 6px 8px;
+    font-family: 'SF Mono', Monaco, monospace; font-size: 11px;
+    color: #e8eaed; overflow-x: auto; white-space: pre-wrap;
+    margin-top: 4px; max-height: 120px; overflow-y: auto;
+  }
+  .message .bubble .code-block .key { color: #7ec8e3; }
+  .message .bubble .code-block .str { color: #a8dab5; }
+  .message .bubble .code-block .num { color: #f9c859; }
+
+  /* 空状态 */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; height: 100%; color: #5f6368; text-align: center;
+    padding: 20px;
+  }
+  .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+  .empty-state h3 { font-size: 16px; margin-bottom: 8px; color: #9aa0a6; }
+  .empty-state p { font-size: 13px; line-height: 1.6; }
+  .empty-state .voice-hint {
+    margin-top: 16px; padding: 8px 16px; border-radius: 20px;
+    background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3);
+    color: #667eea; font-size: 13px;
+  }
+
+  /* 思考中指示器 */
+  .thinking-indicator { display: none; align-items: center; gap: 6px; padding: 8px 12px; margin-left: 36px; }
   .thinking-indicator.active { display: flex; }
-  .thinking-indicator .dot-pulse {
-    display: flex; gap: 4px;
+  .thinking-indicator .dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #667eea;
+    animation: think-bounce 1.2s ease-in-out infinite;
   }
-  .thinking-indicator .dot-pulse span {
-    width: 6px; height: 6px; border-radius: 50%; background: #999;
-    animation: dotPulse 1.4s infinite ease-in-out both;
-  }
-  .thinking-indicator .dot-pulse span:nth-child(1) { animation-delay: -0.32s; }
-  .thinking-indicator .dot-pulse span:nth-child(2) { animation-delay: -0.16s; }
-  @keyframes dotPulse { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+  .thinking-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes think-bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
 
-  /* === Code Block === */
-  .bubble .code-block {
-    background: #1e1e2e; color: #cdd6f4; border-radius: 8px;
-    margin: 8px 0; overflow: hidden; font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 12px; line-height: 1.5;
-  }
-  .bubble .code-block .code-header {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 6px 12px; background: #181825; font-size: 11px; color: #a6adc8;
-  }
-  .bubble .code-block .code-header .collapse-btn {
-    background: none; border: none; color: #a6adc8; cursor: pointer;
-    font-size: 14px; padding: 0 4px; transition: transform 0.2s;
-  }
-  .bubble .code-block .code-header .collapse-btn.collapsed { transform: rotate(-90deg); }
-  .bubble .code-block pre {
-    margin: 0; padding: 12px; overflow-x: auto; max-height: 300px;
-  }
-  .bubble .code-block.collapsed pre { display: none; }
-
-  /* === Error Block === */
-  .bubble .error-block {
-    background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
-    padding: 10px 14px; color: #dc2626; font-size: 13px; margin: 8px 0;
-  }
-  .bubble .error-block .error-title { font-weight: 600; margin-bottom: 4px; }
-
-  /* === Summary Block === */
-  .bubble .summary-block {
-    background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;
-    padding: 10px 14px; font-size: 13px; color: #166534; margin: 8px 0;
-  }
-
-  /* === Canvas Panel (Right) === */
+  /* === 画布面板 === */
   .canvas-panel {
-    flex: 1; display: flex; flex-direction: column; background: #fafafa;
-    position: relative;
+    flex: 1; display: flex; flex-direction: column; position: relative;
+    background: #0d0e12;
   }
-  .canvas-header {
-    padding: 10px 20px; font-size: 13px; color: #666;
-    border-bottom: 1px solid #e8eaed; display: flex;
-    align-items: center; gap: 12px; background: #fff;
+  .canvas-panel .canvas-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px; background: #13141b;
+    border-bottom: 1px solid #2a2b35; flex-shrink: 0;
+    font-size: 12px; color: #9aa0a6;
   }
-  .canvas-header .status-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #22c55e; display: inline-block;
+  .canvas-status {
+    display: flex; align-items: center; gap: 6px;
   }
-  .canvas-header .status-dot.idle { background: #94a3b8; }
-  .canvas-header .status-text { font-size: 12px; color: #94a3b8; }
-  .canvas-container {
-    flex: 1; position: relative; margin: 8px; border-radius: 8px;
-    overflow: hidden; background: #fff;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  .canvas-status .status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
   }
-  .canvas-container iframe {
+  .canvas-status .status-dot.ready { background: #34a853; }
+  .canvas-status .status-dot.drawing { background: #fbbc04; animation: pulse-dot 1s infinite; }
+  .canvas-status .status-dot.error { background: #ea4335; }
+  .canvas-wrapper {
+    flex: 1; position: relative; overflow: hidden;
+  }
+  .canvas-wrapper iframe {
     width: 100%; height: 100%; border: none;
   }
+  /* 画布操作提示浮层 */
   .canvas-overlay {
-    position: absolute; top: 12px; left: 12px;
-    background: rgba(0,0,0,0.6); color: #fff; padding: 6px 12px;
-    border-radius: 6px; font-size: 12px; pointer-events: none;
-    opacity: 0; transition: opacity 0.3s;
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+    padding: 6px 16px; border-radius: 16px; font-size: 12px; color: #e8eaed;
+    pointer-events: none; opacity: 0; transition: opacity 0.3s;
+    white-space: nowrap;
   }
   .canvas-overlay.active { opacity: 1; }
 
-  /* === Bottom Input === */
-  .bottom-bar {
-    display: flex; align-items: center; gap: 8px;
-    padding: 10px 24px; background: #fff;
-    border-top: 1px solid #e8eaed; flex-shrink: 0;
-  }
-  .bottom-bar .attach-btn {
-    width: 36px; height: 36px; border-radius: 50%; border: none;
-    background: #f0f2f5; cursor: pointer; font-size: 18px;
-    display: flex; align-items: center; justify-content: center; 
-    transition: all 0.2s; flex-shrink: 0;
-  }
-  .bottom-bar .attach-btn:hover { background: #e0e3e8; }
-  .bottom-bar .input-wrap {
-    flex: 1; display: flex; align-items: center; gap: 8px;
-    background: #f0f2f5; border-radius: 24px; padding: 4px 4px 4px 16px;
-    border: 1px solid transparent; transition: all 0.2s;
-  }
-  .bottom-bar .input-wrap:focus-within { background: #fff; border-color: #1a73e8; }
-  .bottom-bar .input-wrap input {
-    flex: 1; border: none; outline: none; background: transparent;
-    font-size: 14px; color: #333; padding: 6px 0;
-  }
-  .bottom-bar .input-wrap input::placeholder { color: #999; }
-  .bottom-bar .btn-send {
-    width: 36px; height: 36px; border-radius: 50%; border: none;
-    background: #1a73e8; color: #fff; cursor: pointer; font-size: 16px;
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.2s; flex-shrink: 0;
-  }
-  .bottom-bar .btn-send:hover { background: #1557b0; }
-
-  /* === Toast === */
-  .toast {
-    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
-    background: rgba(0,0,0,0.8); color: #fff; padding: 8px 20px;
-    border-radius: 20px; font-size: 13px; z-index: 999;
-    opacity: 0; transition: opacity 0.3s; pointer-events: none;
-  }
-  .toast.active { opacity: 1; }
-
-  /* === Empty State === */
-  .empty-state {
+  /* === 底部语音控制区 === */
+  .voice-bar {
     display: flex; flex-direction: column; align-items: center;
-    justify-content: center; height: 100%; color: #bbb;
-    padding: 40px; text-align: center;
+    padding: 16px 20px 20px; background: #1a1b23;
+    border-top: 1px solid #2a2b35; flex-shrink: 0;
+    position: relative;
   }
-  .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
-  .empty-state .title { font-size: 16px; color: #888; margin-bottom: 8px; }
-  .empty-state .desc { font-size: 13px; line-height: 1.6; }
+  .voice-bar .hint-text {
+    font-size: 12px; color: #9aa0a6; margin-bottom: 12px;
+    transition: opacity 0.2s;
+  }
+  .voice-bar .hint-text.listening { color: #667eea; }
+  .voice-bar .hint-text.processing { color: #fbbc04; }
 
-  /* === Responsive === */
-  @media (max-width: 860px) {
-    .main-content { flex-direction: column; }
-    .chat-panel { width: 100%; min-width: 0; max-height: 40vh; border-right: none; border-bottom: 1px solid #e8eaed; }
-    .canvas-panel { flex: 1; min-height: 300px; }
-    .top-bar { flex-wrap: wrap; padding: 8px 12px; }
-    .top-bar .top-input-wrap { order: 3; width: 100%; }
+  /* 语音按钮 */
+  .voice-btn {
+    width: 72px; height: 72px; border-radius: 50%;
+    border: none; cursor: pointer; position: relative;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  }
+  .voice-btn:active, .voice-btn.pressed {
+    transform: scale(0.92);
+    background: linear-gradient(135deg, #5a6fd6, #6a4292);
+  }
+  .voice-btn.recording {
+    animation: voice-pulse 1.5s ease-in-out infinite;
+    background: linear-gradient(135deg, #ea4335, #fbbc04);
+  }
+  @keyframes voice-pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(234,67,53,0.4); }
+    50% { box-shadow: 0 0 0 20px rgba(234,67,53,0); }
+  }
+  .voice-btn .icon {
+    font-size: 28px; position: relative; z-index: 2;
+    transition: transform 0.2s;
+  }
+  .voice-btn.recording .icon { transform: scale(1.1); }
+  
+  /* 录制波纹 */
+  .voice-btn .ripple {
+    position: absolute; inset: -8px; border-radius: 50%;
+    border: 2px solid rgba(234,67,53,0.3);
+    opacity: 0; transform: scale(0.8);
+  }
+  .voice-btn.recording .ripple {
+    animation: ripple-expand 1.5s ease-out infinite;
+  }
+  .voice-btn.recording .ripple:nth-child(2) { animation-delay: 0.5s; }
+  .voice-btn.recording .ripple:nth-child(3) { animation-delay: 1s; }
+  @keyframes ripple-expand {
+    0% { opacity: 0.6; transform: scale(0.8); }
+    100% { opacity: 0; transform: scale(1.8); }
+  }
+
+  /* 波形可视化 */
+  .waveform {
+    display: none; align-items: center; gap: 3px; height: 24px;
+    margin-top: 8px;
+  }
+  .waveform.active { display: flex; }
+  .waveform .bar {
+    width: 3px; background: #667eea; border-radius: 2px;
+    animation: wave-bar 0.8s ease-in-out infinite;
+  }
+  .waveform .bar:nth-child(1) { height: 8px; animation-delay: 0s; }
+  .waveform .bar:nth-child(2) { height: 16px; animation-delay: 0.1s; }
+  .waveform .bar:nth-child(3) { height: 22px; animation-delay: 0.2s; }
+  .waveform .bar:nth-child(4) { height: 14px; animation-delay: 0.3s; }
+  .waveform .bar:nth-child(5) { height: 20px; animation-delay: 0.4s; }
+  .waveform .bar:nth-child(6) { height: 10px; animation-delay: 0.5s; }
+  .waveform .bar:nth-child(7) { height: 18px; animation-delay: 0.6s; }
+  .waveform .bar:nth-child(8) { height: 12px; animation-delay: 0.7s; }
+  @keyframes wave-bar { 0%,100%{transform:scaleY(0.6)} 50%{transform:scaleY(1)} }
+
+  /* 持续通话模式开关 */
+  .mode-toggle {
+    position: absolute; right: 20px; bottom: 28px;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: #5f6368;
+  }
+  .mode-toggle .switch {
+    width: 36px; height: 20px; border-radius: 10px;
+    background: #2a2b35; cursor: pointer; position: relative;
+    transition: background 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mode-toggle .switch.active { background: #667eea; }
+  .mode-toggle .switch .knob {
+    width: 16px; height: 16px; border-radius: 50%; background: #e8eaed;
+    position: absolute; top: 2px; left: 2px; transition: left 0.2s;
+  }
+  .mode-toggle .switch.active .knob { left: 18px; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.85); backdrop-filter: blur(12px);
+    color: #e8eaed; padding: 8px 20px; border-radius: 20px;
+    font-size: 13px; pointer-events: none; opacity: 0;
+    transition: opacity 0.3s, transform 0.3s;
+    z-index: 1000; white-space: nowrap;
+  }
+  .toast.active { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* 响应式 */
+  @media (max-width: 768px) {
+    .main-content { flex-direction: column-reverse; }
+    .chat-panel { width: 100%; min-width: auto; max-height: 35vh; border-right: none; border-top: 1px solid #2a2b35; }
+    .voice-btn { width: 64px; height: 64px; }
+    .voice-btn .icon { font-size: 24px; }
   }
 </style>
 </head>
 <body>
-<div class="app-container">
-  <!-- Top Bar -->
-  <div class="top-bar">
-    <div class="logo">🎨 <span>AI 绘图</span></div>
-    <div class="top-input-wrap">
-      <input type="text" id="topInput" placeholder="输入绘图指令，如：画一个太阳、画一栋房子..." 
-             onkeydown="if(event.key==='Enter') submitTopCmd()">
-      <button class="btn btn-primary" onclick="submitTopCmd()">指令</button>
-      <button class="btn-icon" id="topMicBtn" onclick="toggleVoice()" title="语音输入">🎤</button>
+
+<div class="app">
+
+  <!-- === 顶部标题栏 === -->
+  <div class="header">
+    <h1>🎨 AI 语音绘图</h1>
+    <div class="voice-indicator">
+      <span class="indicator-dot"></span>
+      <span id="statusText">语音就绪</span>
     </div>
   </div>
 
-  <!-- Main Content -->
+  <!-- === 主体 === -->
   <div class="main-content">
-    <!-- Chat Panel -->
+
+    <!-- 左侧对话面板 -->
     <div class="chat-panel">
-      <div class="chat-header">
-        💬 对话记录 <span class="badge">文字/语音输入</span>
-      </div>
+      <div class="panel-title">💬 对话记录</div>
       <div class="chat-messages" id="chatMessages">
         <div class="empty-state" id="emptyState">
-          <div class="icon">🎨</div>
-          <div class="title">开始创作</div>
-          <div class="desc">在顶部或底部输入框描述你的绘图想法<br>支持：文字输入 / 🎤 语音输入</div>
+          <div class="icon">🎙️</div>
+          <h3>按住麦克风 · 用语音画画</h3>
+          <p>尝试说：<br>"画一个太阳"<br>"画一个阳台，放一张桌子"<br>"画一朵花"<br>"清空画布" / "撤销"</p>
+          <div class="voice-hint">🎤 按住底部按钮说话，松手即发送</div>
         </div>
       </div>
       <div class="thinking-indicator" id="thinkingIndicator">
-        <div class="dot-pulse"><span></span><span></span><span></span></div>
-        <span>AI 正在解析指令...</span>
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span style="font-size:12px;color:#9aa0a6;margin-left:4px;">处理中...</span>
       </div>
     </div>
 
-    <!-- Canvas Panel -->
+    <!-- 右侧画布面板 -->
     <div class="canvas-panel">
       <div class="canvas-header">
-        <span class="status-dot" id="canvasStatusDot"></span>
-        <span class="status-text" id="canvasStatusText">画布就绪</span>
-        <span style="flex:1"></span>
-        <button class="btn btn-icon" onclick="clearCanvas()" title="清空画布" style="width:28px;height:28px;font-size:14px;">🗑️</button>
-        <button class="btn btn-icon" onclick="undoCanvas()" title="撤销" style="width:28px;height:28px;font-size:14px;">↩️</button>
-      </div>
-      <div class="canvas-container" id="canvasContainer">
-        <div class="empty-state" style="position:absolute;inset:0;z-index:1;background:#fff;" id="canvasLoading">
-          <div class="icon">🖼️</div>
-          <div class="title">加载画布中...</div>
+        <div class="canvas-status">
+          <span class="status-dot ready" id="statusDot"></span>
+          <span id="canvasStatus">画布就绪</span>
         </div>
-        <iframe id="canvasIframe" src="/assets/canvas.html" 
-                style="width:100%;height:100%;border:none;"
-                allow="microphone"></iframe>
+        <span id="shapeCount">图形: 0</span>
+      </div>
+      <div class="canvas-wrapper">
+        <iframe id="canvasIframe" src="/assets/canvas.html" frameborder="0"></iframe>
         <div class="canvas-overlay" id="canvasOverlay"></div>
       </div>
     </div>
   </div>
 
-  <!-- Bottom Bar -->
-  <div class="bottom-bar">
-    <button class="attach-btn" onclick="showToast('📎 文件上传功能开发中')" title="附件">📎</button>
-    <div class="input-wrap">
-      <input type="text" id="bottomInput" placeholder="输入绘图指令，或点击 🎤 语音输入..." 
-             onkeydown="if(event.key==='Enter') submitBottomCmd()">
-      <button class="btn-icon" id="bottomMicBtn" onclick="toggleVoice()" title="语音输入" style="width:30px;height:30px;font-size:15px;background:transparent;">🎤</button>
+  <!-- === 底部语音控制 === -->
+  <div class="voice-bar">
+    <div class="hint-text" id="voiceHint">🎤 按住说话 · 松手发送</div>
+    <div class="waveform" id="waveform">
+      <span class="bar"></span><span class="bar"></span><span class="bar"></span>
+      <span class="bar"></span><span class="bar"></span><span class="bar"></span>
+      <span class="bar"></span><span class="bar"></span>
     </div>
-    <button class="btn-send" onclick="submitBottomCmd()" title="发送">➤</button>
+    <button class="voice-btn" id="voiceBtn">
+      <span class="ripple"></span>
+      <span class="ripple"></span>
+      <span class="ripple"></span>
+      <span class="icon">🎤</span>
+    </button>
+    <div class="mode-toggle">
+      <span>单次</span>
+      <div class="switch" id="modeSwitch">
+        <span class="knob"></span>
+      </div>
+      <span>持续</span>
+    </div>
   </div>
 </div>
 
@@ -316,443 +358,492 @@
 <div class="toast" id="toast"></div>
 
 <script>
-// ====== State ======
+'use strict';
+
+// ====== 状态 ======
 const STATE = {
-  taskId: 0,
   isRecording: false,
+  isProcessing: false,
+  canvasReady: false,
+  continuousMode: false,  // false=按住说话, true=点击切换
   mediaRecorder: null,
   audioChunks: [],
-  canvasReady: false,
+  mediaStream: null,
+  commandsCount: 0
 };
 
-// ====== DOM References ======
+// ====== DOM 引用 ======
+const voiceBtn = document.getElementById('voiceBtn');
+const voiceHint = document.getElementById('voiceHint');
+const waveform = document.getElementById('waveform');
 const chatMessages = document.getElementById('chatMessages');
 const emptyState = document.getElementById('emptyState');
 const thinkingIndicator = document.getElementById('thinkingIndicator');
-const topInput = document.getElementById('topInput');
-const bottomInput = document.getElementById('bottomInput');
-const canvasIframe = document.getElementById('canvasIframe');
+const canvasStatus = document.getElementById('canvasStatus');
+const statusDot = document.getElementById('statusDot');
+const shapeCount = document.getElementById('shapeCount');
 const canvasOverlay = document.getElementById('canvasOverlay');
-const canvasStatusDot = document.getElementById('canvasStatusDot');
-const canvasStatusText = document.getElementById('canvasStatusText');
-const canvasLoading = document.getElementById('canvasLoading');
+const toast = document.getElementById('toast');
+const modeSwitch = document.getElementById('modeSwitch');
+const canvasIframe = document.getElementById('canvasIframe');
+const statusText = document.getElementById('statusText');
 
-// ====== Canvas iframe通信 ======
-canvasIframe.onload = () => {
-  canvasLoading.style.display = 'none';
-  STATE.canvasReady = true;
-  setCanvasStatus('ready');
-};
-
-function sendToCanvas(cmd) {
-  if (!STATE.canvasReady || !canvasIframe.contentWindow) {
-    showToast('⚠️ 画布尚未加载完成');
-    return false;
-  }
-  try {
-    canvasIframe.contentWindow.postMessage(cmd, '*');
-    return true;
-  } catch(e) {
-    console.error('postMessage error:', e);
-    return false;
-  }
-}
-
-function setCanvasStatus(text) {
-  const statusMap = {
-    'ready': ['画布就绪', '#22c55e'],
-    'drawing': ['正在绘制...', '#f59e0b'],
-    'idle': ['等待指令', '#94a3b8'],
-    'error': ['绘制出错', '#ef4444'],
-  };
-  const [label, color] = statusMap[text] || [text, '#94a3b8'];
-  canvasStatusText.textContent = label;
-  canvasStatusDot.style.background = color;
-}
-
-// 监听canvas状态上报
-window.addEventListener('message', (e) => {
-  const data = e.data;
-  if (!data) return;
-  if (data.source === 'coze-canvas-response') {
-    if (data.status === 'completed') {
-      setCanvasStatus('ready');
-      showToast(`✅ ${data.summary || '绘制完成'}`);
-    }
-  }
-  if (data.source === 'coze-canvas-ready') {
-    setCanvasStatus('ready');
-  }
-});
-
-// ====== 添加消息气泡 ======
-function addMessage(role, content, extra) {
-  emptyState.style.display = 'none';
-  
-  const msgDiv = document.createElement('div');
-  msgDiv.className = `message ${role}`;
-  
-  const avatar = document.createElement('div');
-  avatar.className = 'avatar';
-  avatar.textContent = role === 'assistant' ? 'AI' : '👤';
-  
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
-  
-  const nameSpan = document.createElement('div');
-  nameSpan.className = 'sender-name';
-  nameSpan.textContent = role === 'assistant' ? 'AI 绘图助手' : '你';
-  bubble.appendChild(nameSpan);
-  
-  // Text content
-  if (content) {
-    const textP = document.createElement('div');
-    textP.textContent = content;
-    bubble.appendChild(textP);
-  }
-  
-  // Extra blocks (code, error, summary)
-  if (extra) {
-    if (extra.type === 'code' && extra.content) {
-      const codeBlock = createCodeBlock(extra.label || '指令代码', extra.content);
-      bubble.appendChild(codeBlock);
-    }
-    if (extra.type === 'error') {
-      const errBlock = document.createElement('div');
-      errBlock.className = 'error-block';
-      errBlock.innerHTML = `<div class="error-title">❌ ${extra.title || '错误'}</div>${extra.content}`;
-      bubble.appendChild(errBlock);
-    }
-    if (extra.type === 'summary') {
-      const sumBlock = document.createElement('div');
-      sumBlock.className = 'summary-block';
-      sumBlock.innerHTML = `✅ ${extra.content}`;
-      bubble.appendChild(sumBlock);
-    }
-  }
-  
-  msgDiv.appendChild(avatar);
-  msgDiv.appendChild(bubble);
-  chatMessages.appendChild(msgDiv);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-function createCodeBlock(label, code) {
-  const div = document.createElement('div');
-  div.className = 'code-block';
-  
-  const header = document.createElement('div');
-  header.className = 'code-header';
-  header.innerHTML = `<span>${label}</span><button class="collapse-btn" onclick="toggleCode(this)">▼</button>`;
-  div.appendChild(header);
-  
-  const pre = document.createElement('pre');
-  pre.textContent = code;
-  div.appendChild(pre);
-  
-  return div;
-}
-
-function toggleCode(btn) {
-  const block = btn.closest('.code-block');
-  block.classList.toggle('collapsed');
-  btn.classList.toggle('collapsed');
-}
-
-// ====== 指令提交 ======
-async function submitTopCmd() {
-  const text = topInput.value.trim();
-  if (!text) return;
-  topInput.value = '';
-  await processCommand(text);
-}
-
-async function submitBottomCmd() {
-  const text = bottomInput.value.trim();
-  if (!text) return;
-  bottomInput.value = '';
-  await processCommand(text);
-}
-
-async function processCommand(text) {
-  // 添加用户消息
-  addMessage('user', text);
-  
-  // 显示思考中
-  thinkingIndicator.classList.add('active');
-  setCanvasStatus('drawing');
-  
-  try {
-    // 调用 Agent API
-    const result = await callAgent(text);
-    
-    // 解析返回的指令
-    let commands = [];
-    let summary = '';
-    let hasError = false;
-    
-    if (result && result.commands) {
-      commands = result.commands;
-      summary = result.summary || `已解析 ${commands.length} 条绘图指令`;
-    } else if (typeof result === 'string') {
-      // 尝试解析 JSON
-      try {
-        const parsed = JSON.parse(result);
-        if (Array.isArray(parsed)) {
-          commands = parsed;
-          summary = `已解析 ${commands.length} 条绘图指令`;
-        } else if (parsed.commands) {
-          commands = parsed.commands;
-          summary = parsed.summary || '';
-        }
-      } catch {
-        summary = result;
-      }
-    }
-    
-    // 添加 AI 回复
-    if (commands.length > 0) {
-      addMessage('assistant', summary, {
-        type: 'code',
-        label: `📋 绘图指令 (${commands.length}条)`,
-        content: JSON.stringify(commands, null, 2)
-      });
-      
-      // 逐条下发到 Canvas
-      let delay = 0;
-      commands.forEach((cmd, i) => {
-        setTimeout(() => {
-          sendToCanvas(cmd);
-          canvasOverlay.textContent = `🎨 [${i+1}/${commands.length}] ${cmd.operate || cmd.type}`;
-          canvasOverlay.classList.add('active');
-        }, delay);
-        delay += 350;
-      });
-      
-      // 最后清除 overlay 提示
-      setTimeout(() => {
-        canvasOverlay.classList.remove('active');
-        setCanvasStatus('ready');
-      }, delay + 500);
-      
-    } else if (summary) {
-      addMessage('assistant', summary);
-      setCanvasStatus('ready');
-    } else {
-      addMessage('assistant', '抱歉，未能解析您的指令，请重新描述。', {
-        type: 'error',
-        title: '指令解析失败',
-        content: '请尝试更清晰的描述，例如："画一个红色圆形" 或 "画一个太阳"'
-      });
-      setCanvasStatus('ready');
-    }
-    
-  } catch (err) {
-    addMessage('assistant', '', {
-      type: 'error',
-      title: '处理出错',
-      content: err.message || '请稍后重试'
-    });
-    setCanvasStatus('ready');
-  } finally {
-    thinkingIndicator.classList.remove('active');
-  }
-}
-
-// ====== Agent API 调用 ======
-async function callAgent(text) {
-  const taskId = ++STATE.taskId;
-  
-  try {
-    const resp = await fetch('/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'default',
-        messages: [{ role: 'user', content: text }],
-        stream: false
-      })
-    });
-    
-    if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
-    
-    const data = await resp.json();
-    const content = data.choices?.[0]?.message?.content || data.content || '';
-    
-    // 解析 JSON 指令
-    try {
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) {
-        return { commands: parsed, summary: `已解析 ${parsed.length} 条绘图指令` };
-      }
-      return { commands: [], summary: content };
-    } catch {
-      // 尝试从文本中提取 JSON
-      const jsonMatch = content.match(/\[[\s\S]*?\]/);
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (Array.isArray(parsed)) {
-            return { commands: parsed, summary: content.replace(jsonMatch[0], '').trim() || `已解析 ${parsed.length} 条绘图指令` };
-          }
-        } catch {}
-      }
-      return { commands: [], summary: content };
-    }
-  } catch (err) {
-    // 如果 API 调用失败，回退到本地模拟
-    console.warn('API call failed, using fallback:', err);
-    return fallbackAgent(text);
-  }
-}
-
-// ====== Fallback (API不可用时的本地模拟) ======
-async function fallbackAgent(text) {
-  // Simple keyword-based fallback
-  const cmds = [];
-  
-  if (text.includes('太阳') || text.includes('sun')) {
-    cmds.push({ operate: 'circle', args: [400, 200, 60, '#FFDD00', '#FF8800', 3] });
-    for (let a = 0; a < 360; a += 45) {
-      const rad = a * Math.PI / 180;
-      cmds.push({ operate: 'line', args: [
-        400 + Math.cos(rad) * 60, 200 + Math.sin(rad) * 60,
-        400 + Math.cos(rad) * 110, 200 + Math.sin(rad) * 110,
-        '#FF8800', 3
-      ]});
-    }
-  } else if (text.includes('圆') || text.includes('circle') || text.includes('圈')) {
-    cmds.push({ operate: 'circle', args: [500, 500, 200, 'white', 'black', 3] });
-  } else if (text.includes('矩形') || text.includes('rect') || text.includes('方块') || text.includes('方')) {
-    cmds.push({ operate: 'rect', args: [300, 300, 400, 300, 'white', 'black', 3] });
-  } else if (text.includes('线') || text.includes('line')) {
-    cmds.push({ operate: 'line', args: [100, 500, 900, 500, 'black', 3] });
-  } else if (text.includes('清空') || text.includes('clear') || text.includes('擦掉')) {
-    cmds.push({ operate: 'clear', args: [] });
-  } else if (text.includes('撤销') || text.includes('undo') || text.includes('撤回') || text.includes('回退')) {
-    cmds.push({ operate: 'undo', args: [] });
-  } else {
-    return { commands: [], summary: `收到指令: "${text}"。请使用更清晰的描述，例如："画一个红色圆形" 或 "画一个太阳"。` };
-  }
-  
-  return { commands: cmds, summary: `已解析 ${cmds.length} 条绘图指令` };
-}
-
-// ====== 画布控制 ======
-function clearCanvas() {
-  sendToCanvas({ operate: 'clear', args: [] });
-  addMessage('assistant', '🗑️ 已清空画布');
-  showToast('🗑️ 画布已清空');
-}
-
-function undoCanvas() {
-  sendToCanvas({ operate: 'undo', args: [] });
-  addMessage('assistant', '↩️ 已撤销上一步');
-  showToast('↩️ 已撤销');
-}
-
-// ====== 语音输入 ======
-async function toggleVoice() {
-  if (STATE.isRecording) {
-    stopVoiceRecording();
-    return;
-  }
-  startVoiceRecording();
-}
-
-async function startVoiceRecording() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    STATE.mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-    STATE.audioChunks = [];
-    
-    STATE.mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) STATE.audioChunks.push(e.data);
-    };
-    
-    STATE.mediaRecorder.onstop = async () => {
-      stream.getTracks().forEach(t => t.stop());
-      const audioBlob = new Blob(STATE.audioChunks, { type: 'audio/webm' });
-      await processAudioInput(audioBlob);
-    };
-    
-    STATE.mediaRecorder.start();
-    STATE.isRecording = true;
-    document.getElementById('topMicBtn').classList.add('recording');
-    document.getElementById('bottomMicBtn').classList.add('recording');
-    showToast('🎤 正在录音，点击麦克风停止...');
-  } catch (err) {
-    showToast('❌ 无法访问麦克风: ' + err.message);
-  }
-}
-
-function stopVoiceRecording() {
-  if (STATE.mediaRecorder && STATE.mediaRecorder.state !== 'inactive') {
-    STATE.mediaRecorder.stop();
-  }
-  STATE.isRecording = false;
-  document.getElementById('topMicBtn').classList.remove('recording');
-  document.getElementById('bottomMicBtn').classList.remove('recording');
-}
-
-async function processAudioInput(audioBlob) {
-  addMessage('assistant', '🎤 正在识别语音...');
-  thinkingIndicator.classList.add('active');
-  
-  try {
-    const formData = new FormData();
-    formData.append('file', audioBlob, `voice_${Date.now()}.webm`);
-    
-    const resp = await fetch('/v1/audio/transcriptions', {
-      method: 'POST',
-      body: formData
-    });
-    
-    if (resp.ok) {
-      const data = await resp.json();
-      const text = data.text || data.content || '';
-      if (text) {
-        // 移除"正在识别"消息
-        chatMessages.removeChild(chatMessages.lastChild);
-        await processCommand(text);
-        return;
-      }
-    }
-    
-    // 语音识别失败
-    chatMessages.removeChild(chatMessages.lastChild);
-    addMessage('assistant', '🎤 未识别到语音内容，请重试', {
-      type: 'error',
-      title: '语音识别失败',
-      content: '请确保麦克风正常工作，说话清晰'
-    });
-    
-  } catch (err) {
-    chatMessages.removeChild(chatMessages.lastChild);
-    addMessage('assistant', '🎤 语音处理出错', {
-      type: 'error',
-      title: '语音服务不可用',
-      content: err.message || '请稍后重试或使用文字输入'
-    });
-  } finally {
-    thinkingIndicator.classList.remove('active');
-  }
-}
-
-// ====== Toast ======
+// ====== 显示Toast ======
 function showToast(msg) {
-  const toast = document.getElementById('toast');
   toast.textContent = msg;
   toast.classList.add('active');
   clearTimeout(toast._timer);
   toast._timer = setTimeout(() => toast.classList.remove('active'), 2500);
 }
 
-// ====== 初始化提示 ======
-addMessage('assistant', '🎨 欢迎使用 AI 语音绘图工具！', {
-  type: 'summary',
-  content: '在输入框中描述您的绘图想法，例如：\n• "画一个红色的太阳"\n• "画一栋带三角形屋顶的房子"\n• "画阳台和阳台上的桌子"\n• "在左边画一个圆，右边画一个弧线"'
+// ====== 添加对话消息 ======
+function addMessage(role, content, extra) {
+  emptyState.style.display = 'none';
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `message ${role}`;
+  
+  const header = document.createElement('div');
+  header.className = 'msg-header';
+  header.innerHTML = `
+    <div class="avatar">${role === 'user' ? '👤' : '🤖'}</div>
+    <span class="role">${role === 'user' ? '你 (语音)' : 'AI 绘图助手'}</span>
+    <span class="time">${new Date().toLocaleTimeString()}</span>
+  `;
+  
+  const bubble = document.createElement('div');
+  bubble.className = extra?.type === 'error' ? 'bubble error' : 'bubble';
+  
+  if (extra?.type === 'error') {
+    bubble.innerHTML = `<div class="block-title">⚠️ ${extra.title || '错误'}</div><div>${content}</div>`;
+  } else if (extra?.type === 'code') {
+    const codeHTML = highlightJSON(extra.content || content);
+    bubble.innerHTML = `
+      <div class="block-title">📋 ${extra.title || '绘图指令'}</div>
+      <div class="code-block">${codeHTML}</div>
+    `;
+  } else {
+    bubble.textContent = content;
+  }
+  
+  msgDiv.appendChild(header);
+  msgDiv.appendChild(bubble);
+  chatMessages.appendChild(msgDiv);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function highlightJSON(json) {
+  if (typeof json === 'string') {
+    try { json = JSON.parse(json); } catch { return escapeHtml(json); }
+  }
+  const str = JSON.stringify(json, null, 2);
+  return escapeHtml(str).replace(/"([^"]+)":/g, '<span class="key">"$1"</span>:')
+    .replace(/"([^"]+)"/g, '<span class="str">"$1"</span>')
+    .replace(/\b(\d+)\b/g, '<span class="num">$1</span>');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ====== 更新画布状态 ======
+function setCanvasStatus(text, type) {
+  canvasStatus.textContent = text;
+  statusDot.className = 'status-dot ' + type;
+}
+
+// ====== 发送指令到画布 ======
+function sendToCanvas(cmd) {
+  if (!STATE.canvasReady || !canvasIframe || !canvasIframe.contentWindow) {
+    console.warn('Canvas not ready');
+    return;
+  }
+  canvasIframe.contentWindow.postMessage(cmd, '*');
+}
+
+// ====== 全链路绘制 ======
+async function processCommand(text) {
+  if (STATE.isProcessing) return;
+  STATE.isProcessing = true;
+  voiceHint.textContent = '🤔 正在解析指令...';
+  voiceHint.className = 'hint-text processing';
+  thinkingIndicator.classList.add('active');
+  
+  // 添加用户语音消息
+  addMessage('user', `🎤 "${text}"`);
+  
+  try {
+    let commands = [];
+    let summary = '';
+    
+    // 优先尝试API，失败则用fallback
+    const resp = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          { role: 'system', content: '你是一个语音绘图指令解析器。' },
+          { role: 'user', content: text }
+        ],
+        temperature: 0,
+        max_tokens: 2000
+      })
+    });
+    
+    if (resp.ok) {
+      const data = await resp.json();
+      const content = data?.choices?.[0]?.message?.content || '';
+      const jsonMatch = content.match(/\[[\s\S]*?\]/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(parsed)) {
+            commands = parsed;
+            summary = content.replace(jsonMatch[0], '').trim() || `已解析 ${parsed.length} 条指令`;
+          }
+        } catch {}
+      }
+    }
+    
+    // 用 fallback 兜底
+    if (commands.length === 0) {
+      const fallback = fallbackAgent(text);
+      commands = fallback.commands;
+      summary = fallback.summary;
+    }
+    
+    if (!commands.length) {
+      addMessage('assistant', summary);
+      showToast('❌ ' + summary);
+      return;
+    }
+    
+    // 显示指令代码块
+    addMessage('assistant', `✅ ${summary}`, {
+      type: 'code',
+      title: `✅ ${summary}`,
+      content: JSON.stringify(commands, null, 2)
+    });
+    
+    // 逐条发送到画布
+    setCanvasStatus('绘制中...', 'drawing');
+    let delay = 0;
+    for (const cmd of commands) {
+      setTimeout(() => {
+        sendToCanvas(cmd);
+        showOverlay(getOpName(cmd.operate));
+      }, delay);
+      delay += 350;
+    }
+    
+    // 更新图形计数
+    STATE.commandsCount += commands.length;
+    setTimeout(() => {
+      shapeCount.textContent = `图形: ${STATE.commandsCount}`;
+      setCanvasStatus('画布就绪', 'ready');
+    }, delay);
+    
+    showToast(`🎨 正在绘制 ${commands.length} 个元素...`);
+    
+  } catch (err) {
+    console.warn('Process error, using fallback:', err);
+    const fallback = fallbackAgent(text);
+    if (fallback.commands.length) {
+      addMessage('assistant', `✅ ${fallback.summary}`, {
+        type: 'code',
+        title: `✅ ${fallback.summary}`,
+        content: JSON.stringify(fallback.commands, null, 2)
+      });
+      let delay = 0;
+      for (const cmd of fallback.commands) {
+        setTimeout(() => { sendToCanvas(cmd); showOverlay(getOpName(cmd.operate)); }, delay);
+        delay += 350;
+      }
+      STATE.commandsCount += fallback.commands.length;
+      setTimeout(() => { shapeCount.textContent = `图形: ${STATE.commandsCount}`; setCanvasStatus('画布就绪', 'ready'); }, delay);
+    } else {
+      addMessage('assistant', fallback.summary, { type: 'error', title: '未能解析' });
+      showToast('❌ ' + fallback.summary);
+    }
+  } finally {
+    thinkingIndicator.classList.remove('active');
+    STATE.isProcessing = false;
+    updateVoiceHint();
+  }
+}
+
+function getOpName(op) {
+  const names = { circle: '⬤ 圆形', rect: '▬ 矩形', line: '╱ 直线', arc: '⌒ 弧线',
+    clear: '🗑️ 清空', undo: '↩️ 撤销', set_color: '🎨 颜色', set_bg: '🖼 背景' };
+  return names[op] || op;
+}
+
+function showOverlay(text) {
+  canvasOverlay.textContent = text;
+  canvasOverlay.classList.add('active');
+  clearTimeout(canvasOverlay._timer);
+  canvasOverlay._timer = setTimeout(() => canvasOverlay.classList.remove('active'), 1200);
+}
+
+// ====== Fallback 本地解析 ======
+function fallbackAgent(text) {
+  const cmds = [];
+  const t = text.toLowerCase();
+  
+  if (t.includes('清空') || t.includes('清除') || t.includes('擦掉')) {
+    cmds.push({ operate: 'clear', args: [] });
+  } else if (t.includes('撤销') || t.includes('撤回') || t.includes('回退')) {
+    cmds.push({ operate: 'undo', args: [] });
+  } else if (t.includes('太阳')) {
+    cmds.push({ operate: 'circle', args: [400, 200, 60, '#FFDD00', '#FF8800', 3] });
+    for (let a = 0; a < 360; a += 45) {
+      const rad = a * Math.PI / 180;
+      cmds.push({ operate: 'line', args: [
+        400 + Math.cos(rad)*60, 200 + Math.sin(rad)*60,
+        400 + Math.cos(rad)*110, 200 + Math.sin(rad)*110, '#FF8800', 3
+      ]});
+    }
+  } else if (t.includes('花')) {
+    const cx=500, cy=350;
+    for (let a=0; a<360; a+=72) {
+      const rad = a * Math.PI / 180;
+      cmds.push({ operate: 'circle', args: [cx+Math.cos(rad)*80, cy+Math.sin(rad)*80, 40, '#f0a0d0', '#d060a0', 2] });
+    }
+    cmds.push({ operate: 'circle', args: [cx, cy, 25, '#FFD700', '#FF8C00', 2] });
+    cmds.push({ operate: 'line', args: [cx, cy+80, cx, cy+200, '#228B22', 4] });
+  } else if (t.includes('阳台') || t.includes('桌子')) {
+    cmds.push({ operate: 'rect', args: [100, 350, 600, 200, '#E8E0D0', '#8B7355', 3] });
+    cmds.push({ operate: 'line', args: [100, 350, 100, 550, '#8B7355', 2] });
+    cmds.push({ operate: 'line', args: [700, 350, 700, 550, '#8B7355', 2] });
+    cmds.push({ operate: 'rect', args: [250, 420, 200, 80, '#A0522D', '#5C3317', 2] });
+    cmds.push({ operate: 'line', args: [250, 500, 250, 540, '#5C3317', 2] });
+    cmds.push({ operate: 'line', args: [450, 500, 450, 540, '#5C3317', 2] });
+  } else if (t.includes('房子')) {
+    cmds.push({ operate: 'rect', args: [300, 350, 400, 350, '#87CEEB', '#4682B4', 3] });
+    cmds.push({ operate: 'line', args: [250, 350, 500, 180, '#CD5C5C', 4] });
+    cmds.push({ operate: 'line', args: [500, 180, 750, 350, '#CD5C5C', 4] });
+    cmds.push({ operate: 'line', args: [250, 350, 750, 350, '#CD5C5C', 4] });
+  } else if (t.includes('圆') || t.includes('圈') || t.includes('circle')) {
+    const color = t.includes('红') ? 'red' : t.includes('蓝') ? 'blue' : t.includes('绿') ? 'green' : 
+                  t.includes('黄') ? 'gold' : t.includes('紫') ? 'purple' : t.includes('黑') ? 'black' : 'white';
+    const stroke = t.includes('红') ? 'darkred' : t.includes('蓝') ? 'darkblue' : t.includes('绿') ? 'darkgreen' : '#333';
+    cmds.push({ operate: 'circle', args: [500, 500, 180, color, stroke, 3] });
+  } else if (t.includes('矩形') || t.includes('方') || t.includes('rect')) {
+    cmds.push({ operate: 'rect', args: [300, 300, 400, 300, '#FFFFFF', '#333333', 3] });
+  } else if (t.includes('线') || t.includes('line')) {
+    cmds.push({ operate: 'line', args: [100, 500, 900, 500, '#333333', 3] });
+  } else {
+    // 通用: 尝试智能解读
+    if (t.includes('弧') || t.includes('弯')) {
+      cmds.push({ operate: 'arc', args: [500, 500, 200, 0, 180, '#333', 3] });
+    } else {
+      cmds.push({ operate: 'circle', args: [500, 500, 150, '#E8E8E8', '#666', 3] });
+      cmds.push({ operate: 'rect', args: [300, 280, 400, 250, 'transparent', '#666', 2] });
+    }
+  }
+  
+  const summary = cmds.length ? `已解析 ${cmds.length} 条绘图指令` : `请说清楚绘图内容，例如"画一个太阳"`;
+  return { commands: cmds, summary };
+}
+
+// ====== 更新语音提示 ======
+function updateVoiceHint() {
+  if (STATE.isProcessing) {
+    voiceHint.textContent = '🤔 正在处理...';
+    voiceHint.className = 'hint-text processing';
+  } else if (STATE.isRecording) {
+    voiceHint.textContent = '🎤 录音中... 松手发送';
+    voiceHint.className = 'hint-text listening';
+  } else {
+    voiceHint.textContent = STATE.continuousMode ? '🎤 点击开始录音 · 再点击停止' : '🎤 按住说话 · 松手发送';
+    voiceHint.className = 'hint-text';
+  }
+}
+
+// ====== 语音录制 ======
+async function startRecording() {
+  if (STATE.isProcessing || STATE.isRecording) return;
+  
+  try {
+    STATE.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    STATE.audioChunks = [];
+    
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+      ? 'audio/webm;codecs=opus' : 'audio/webm';
+    
+    STATE.mediaRecorder = new MediaRecorder(STATE.mediaStream, { mimeType });
+    
+    STATE.mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) STATE.audioChunks.push(e.data);
+    };
+    
+    STATE.mediaRecorder.onstop = async () => {
+      STATE.mediaStream.getTracks().forEach(t => t.stop());
+      const audioBlob = new Blob(STATE.audioChunks, { type: mimeType });
+      await processAudio(audioBlob);
+    };
+    
+    STATE.mediaRecorder.start();
+    STATE.isRecording = true;
+    
+    voiceBtn.classList.add('recording');
+    waveform.classList.add('active');
+    updateVoiceHint();
+    setCanvasStatus('聆听中...', 'drawing');
+    statusText.textContent = '🎤 录音中';
+    showToast('🎤 录音中...');
+    
+  } catch (err) {
+    showToast('❌ 麦克风访问失败: ' + err.message);
+    addMessage('assistant', `❌ 麦克风访问失败: ${err.message}`, { type: 'error', title: '麦克风错误' });
+  }
+}
+
+function stopRecording() {
+  if (!STATE.isRecording || !STATE.mediaRecorder) return;
+  
+  if (STATE.mediaRecorder.state !== 'inactive') {
+    STATE.mediaRecorder.stop();
+  }
+  STATE.isRecording = false;
+  
+  voiceBtn.classList.remove('recording');
+  waveform.classList.remove('active');
+  updateVoiceHint();
+  statusText.textContent = '🎤 处理中';
+}
+
+async function processAudio(audioBlob) {
+  if (audioBlob.size < 100) {
+    showToast('⚠️ 录音太短，请重试');
+    statusText.textContent = '语音就绪';
+    updateVoiceHint();
+    return;
+  }
+  
+  // 尝试 ASR API
+  try {
+    const formData = new FormData();
+    formData.append('file', audioBlob, `voice_${Date.now()}.webm`);
+    
+    const resp = await fetch('/v1/audio/transcriptions', {
+      method: 'POST', body: formData
+    });
+    
+    if (resp.ok) {
+      const data = await resp.json();
+      const text = data.text || data.content || '';
+      if (text && text.trim()) {
+        statusText.textContent = '语音就绪';
+        await processCommand(text.trim());
+        return;
+      }
+    }
+  } catch {}
+  
+  // ASR 失败，显示提示
+  statusText.textContent = '语音就绪';
+  showToast('⚠️ 语音识别暂不可用，已切换文字模式');
+  updateVoiceHint();
+}
+
+// ====== 语音按钮事件 ======
+voiceBtn.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  if (STATE.continuousMode) {
+    // 持续通话模式：点击切换
+    if (STATE.isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  } else {
+    // 按住模式
+    startRecording();
+  }
 });
+
+voiceBtn.addEventListener('mouseup', () => {
+  if (!STATE.continuousMode && STATE.isRecording) {
+    stopRecording();
+  }
+});
+
+voiceBtn.addEventListener('mouseleave', () => {
+  if (!STATE.continuousMode && STATE.isRecording) {
+    stopRecording();  // 鼠标移出按钮也停止
+  }
+});
+
+// 触屏支持
+voiceBtn.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (STATE.continuousMode) {
+    if (STATE.isRecording) stopRecording(); else startRecording();
+  } else {
+    startRecording();
+  }
+}, { passive: false });
+
+voiceBtn.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (!STATE.continuousMode && STATE.isRecording) {
+    stopRecording();
+  }
+}, { passive: false });
+
+voiceBtn.addEventListener('touchcancel', () => {
+  if (!STATE.continuousMode && STATE.isRecording) {
+    stopRecording();
+  }
+});
+
+// 持续通话模式切换
+modeSwitch.addEventListener('click', () => {
+  STATE.continuousMode = !STATE.continuousMode;
+  modeSwitch.classList.toggle('active');
+  updateVoiceHint();
+  showToast(STATE.continuousMode ? '🔄 持续通话模式：点击开关' : '🔴 单次模式：按住说话');
+});
+
+// ====== 键盘/鼠标屏蔽 ======
+document.addEventListener('keydown', (e) => { e.preventDefault(); e.stopPropagation(); return false; }, true);
+document.addEventListener('keyup', (e) => { e.preventDefault(); e.stopPropagation(); return false; }, true);
+document.addEventListener('keypress', (e) => { e.preventDefault(); e.stopPropagation(); return false; }, true);
+document.addEventListener('contextmenu', (e) => { e.preventDefault(); }, true);
+document.addEventListener('selectstart', (e) => { e.preventDefault(); }, true);
+document.addEventListener('dragstart', (e) => { e.preventDefault(); }, true);
+
+// ====== 画布iframe加载 ======
+canvasIframe.onload = () => {
+  STATE.canvasReady = true;
+  console.log('Canvas iframe loaded & ready');
+  showToast('🖼️ 画布已就绪');
+};
+
+// 监听画布状态上报
+window.addEventListener('message', (e) => {
+  const data = e.data;
+  if (!data) return;
+  if (data.target === 'coze-canvas-response') {
+    // 形状数量更新
+    if (typeof data.shapeCount === 'number') {
+      STATE.commandsCount = data.shapeCount;
+      shapeCount.textContent = `图形: ${data.shapeCount}`;
+    }
+    if (data.statusText) {
+      setCanvasStatus(data.statusText, data.statusType || 'ready');
+    }
+  }
+  if (data.target === 'coze-canvas-ready') {
+    STATE.canvasReady = true;
+    showToast('🖼️ 画布已就绪');
+  }
+});
+
+// ====== 页面初始化问候 ======
+showToast('🎤 按住麦克风按钮说话，用语音画画');
+console.log('AI 语音绘图工具已启动 - 纯语音控制模式');
 </script>
 </body>
 </html>
