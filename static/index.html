@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>听画</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">VOICE-FIRST VECTOR STUDIO</p>
+      <h1>听画</h1>
+      <p>说出想法，让图形落在画布上。</p>
+    </div>
+    <div class="voice-panel">
+      <button id="listen-button" type="button" aria-label="开始语音控制">
+        <span class="mic-dot"></span><span id="listen-label">开始聆听</span>
+      </button>
+      <div>
+        <strong id="voice-status">尚未启动</strong>
+        <span id="latency">本地指令等待中</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="canvas-shell">
+      <svg id="canvas" viewBox="0 0 1000 700" role="img" aria-label="语音绘图画布">
+        <defs>
+          <marker id="arrow-head" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L9,3 z" fill="context-stroke"/>
+          </marker>
+          <filter id="selection-glow"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#fb7185"/></filter>
+        </defs>
+        <g id="drawing-layer"></g>
+      </svg>
+      <div class="listening-wave" id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    </section>
+
+    <aside>
+      <section class="transcript-card">
+        <p class="label">刚刚听到</p>
+        <blockquote id="transcript">点击“开始聆听”并允许麦克风权限。</blockquote>
+        <p id="feedback">试试说：“画一个红色圆形放在左边”</p>
+      </section>
+      <section>
+        <p class="label">画布状态</p>
+        <div class="stats">
+          <div><strong id="object-count">0</strong><span>图形</span></div>
+          <div><strong id="selection-count">0</strong><span>已选</span></div>
+        </div>
+        <ol id="object-list"><li>画布还是空的</li></ol>
+      </section>
+      <section>
+        <p class="label">可以这样说</p>
+        <ul class="examples">
+          <li>画一个紫色星形放在中央</li>
+          <li>选中刚才两个图形，然后顶部对齐</li>
+          <li>把它向右移动五十</li>
+          <li>保存为 SVG</li>
+        </ul>
+      </section>
+    </aside>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
