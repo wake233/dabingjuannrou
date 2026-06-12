@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>AI 语音绘图画布</title>
+<style>
+  /* ===== 全局重置 & 键鼠锁定 ===== */
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    -moz-user-select: none !important;
+    -ms-user-select: none !important;
+  }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #f0f0f0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    touch-action: none;          /* 禁用触摸滚动/缩放 */
+    -webkit-touch-callout: none; /* 禁用长按菜单 */
+    cursor: default !important;  /* 强制默认光标 */
+  }
+
+  /* 阻止所有选择/拖拽 */
+  img, canvas, div, p, span, h1, h2, h3 {
+    -webkit-touch-callout: none !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    pointer-events: none !important;  /* 阻止点击/拖拽穿透 */
+  }
+
+  /* ===== 容器布局 ===== */
+  #app-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #ffffff;
+  }
+
+  /* ===== 顶部状态栏 ===== */
+  #status-bar {
+    height: 44px;
+    min-height: 44px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    font-size: 14px;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+
+  #status-bar .status-icon {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #4ade80;
+    display: inline-block;
+    margin-right: 8px;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  #status-text {
+    flex: 1;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #status-shape-count {
+    background: rgba(255,255,255,0.2);
+    padding: 2px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+  }
+
+  /* ===== 画布容器 ===== */
+  #canvas-wrapper {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #drawing-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: #ffffff;
+    /* 关键：阻止所有光标/指针交互 */
+    cursor: default !important;
+    touch-action: none !important;
+  }
+
+  /* ===== 底部操作提示栏 ===== */
+  #action-hint {
+    height: 36px;
+    min-height: 36px;
+    background: #f8f9fa;
+    border-top: 1px solid #e9ecef;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    font-size: 13px;
+    color: #6c757d;
+    transition: all 0.3s ease;
+  }
+
+  #action-hint.active {
+    color: #667eea;
+    font-weight: 600;
+    background: #eef0ff;
+  }
+
+  #action-hint .highlight {
+    color: #667eea;
+    font-weight: 700;
+  }
+
+  /* ===== 欢迎水印 ===== */
+  #welcome-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 5;
+    transition: opacity 0.5s ease;
+  }
+
+  #welcome-overlay.hidden {
+    opacity: 0;
+  }
+
+  #welcome-overlay .mic-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    animation: mic-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes mic-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.6; }
+    50% { transform: scale(1.1); opacity: 1; }
+  }
+
+  #welcome-overlay .welcome-text {
+    font-size: 16px;
+    color: #adb5bd;
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  #welcome-overlay .welcome-text strong {
+    color: #667eea;
+  }
+</style>
+</head>
+<body>
+<div id="app-container">
+  <!-- 状态栏 -->
+  <div id="status-bar">
+    <span>
+      <span class="status-icon"></span>
+      <span id="status-text">🎨 AI 语音绘图 - 等待指令...</span>
+    </span>
+    <span id="status-shape-count">0 个图形</span>
+  </div>
+
+  <!-- 画布区域 -->
+  <div id="canvas-wrapper">
+    <canvas id="drawing-canvas"></canvas>
+    <!-- 欢迎覆盖层 -->
+    <div id="welcome-overlay">
+      <div class="mic-icon">🎤</div>
+      <div class="welcome-text">
+        对我说 <strong>"画一个红色的圆"</strong><br>
+        或 <strong>"在左上角画一个蓝色矩形"</strong><br>
+        即可开始创作 🎨
+      </div>
+    </div>
+  </div>
+
+  <!-- 底部操作提示 -->
+  <div id="action-hint">💡 对我说出绘图的指令，例如"画一个红色的圆在正中间"</div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  /* ============================================================
+   *  1. 安全防护模块 - 全局键鼠拦截
+   * ============================================================ */
+
+  // 鼠标事件拦截
+  const mouseEvents = [
+    'mousedown', 'mouseup', 'click', 'dblclick',
+    'mousemove', 'mouseover', 'mouseout', 'mouseenter', 'mouseleave',
+    'contextmenu', 'drag', 'dragstart', 'dragend', 'dragover',
+    'drop', 'wheel', 'mousewheel', 'selectstart', 'select'
+  ];
+
+  mouseEvents.forEach(evt => {
+    document.addEventListener(evt, function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    }, { capture: true, passive: false });
+  });
+
+  // 触摸事件拦截（移动端）
+  const touchEvents = ['touchstart', 'touchmove', 'touchend', 'touchcancel', 'gesturestart', 'gesturechange', 'gestureend'];
+  touchEvents.forEach(evt => {
+    document.addEventListener(evt, function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    }, { capture: true, passive: false });
+  });
+
+  // 键盘事件拦截 (禁止所有按键交互，包括 F12 开发者工具)
+  document.addEventListener('keydown', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  }, { capture: true });
+
+  document.addEventListener('keyup', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  }, { capture: true });
+
+  document.addEventListener('keypress', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  }, { capture: true });
+
+  // 禁止右键菜单
+  document.oncontextmenu = function() { return false; };
+
+  // 禁止复制/剪切/粘贴
+  document.addEventListener('copy', function(e) { e.preventDefault(); }, { capture: true });
+  document.addEventListener('cut', function(e) { e.preventDefault(); }, { capture: true });
+  document.addEventListener('paste', function(e) { e.preventDefault(); }, { capture: true });
+
+  // 禁用 F12 / 开发者工具快捷键
+  document.addEventListener('keydown', function(e) {
+    if (
+      e.key === 'F12' ||
+      (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
+      (e.ctrlKey && e.key === 'U')
+    ) {
+      e.preventDefault();
+      return false;
+    }
+  }, { capture: true });
+
+  /* ============================================================
+   *  2. Canvas 初始化与尺寸管理
+   * ============================================================ */
+
+  const canvas = document.getElementById('drawing-canvas');
+  const ctx = canvas.getContext('2d');
+  const statusText = document.getElementById('status-text');
+  const shapeCountEl = document.getElementById('status-shape-count');
+  const actionHint = document.getElementById('action-hint');
+  const welcomeOverlay = document.getElementById('welcome-overlay');
+
+  /** 坐标系：画布逻辑尺寸 1000x1000 (相对坐标) */
+  const LOGICAL_SIZE = 1000;
+
+  /** 存储所有绘制的图形命令，用于重绘 */
+  let shapes = [];
+  /** 撤销栈 */
+  let undoStack = [];
+  /** 当前绘图颜色 */
+  let currentColor = '#333333';
+  /** 当前填充颜色 */
+  let currentFillColor = null;
+  /** 当前线条宽度 */
+  let currentLineWidth = 4;
+  /** 画布背景色 */
+  let bgColor = '#ffffff';
+
+  /** 调整 canvas 实际像素尺寸，映射逻辑坐标 */
+  function resizeCanvas() {
+    const wrapper = document.getElementById('canvas-wrapper');
+    const rect = wrapper.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+
+    ctx.scale(dpr, dpr);
+    renderAll();
+  }
+
+  window.addEventListener('resize', resizeCanvas);
+
+  /* ============================================================
+   *  3. 坐标映射工具
+   * ============================================================ */
+
+  /** 逻辑坐标 (0-1000) → 实际像素坐标 */
+  function logicalToPixel(lx, ly) {
+    const w = canvas.width / (window.devicePixelRatio || 1);
+    const h = canvas.height / (window.devicePixelRatio || 1);
+    return {
+      x: (lx / LOGICAL_SIZE) * w,
+      y: (ly / LOGICAL_SIZE) * h
+    };
+  }
+
+  /** 逻辑半径 → 实际像素半径 */
+  function logicalRadius(lr) {
+    const w = canvas.width / (window.devicePixelRatio || 1);
+    return (lr / LOGICAL_SIZE) * w;
+  }
+
+  /** 逻辑宽度 → 实际像素宽度 */
+  function logicalWidth(lw) {
+    const w = canvas.width / (window.devicePixelRatio || 1);
+    return (lw / LOGICAL_SIZE) * w;
+  }
+
+  /* ============================================================
+   *  4. 绘图渲染引擎
+   * ============================================================ */
+
+  function renderAll() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+
+    // 清空画布
+    ctx.clearRect(0, 0, w, h);
+
+    // 绘制背景
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, w, h);
+
+    // 绘制所有图形
+    for (const shape of shapes) {
+      drawShape(shape);
+    }
+  }
+
+  function drawShape(shape) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+
+    const p = shape.params;
+
+    switch (shape.type) {
+      case 'draw_circle': {
+        const pos = logicalToPixel(p.cx || 500, p.cy || 500);
+        const radius = logicalRadius(p.r || 100);
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+        if (p.fill_color && p.fill_color !== 'none') {
+          ctx.fillStyle = p.fill_color;
+          ctx.fill();
+        }
+        ctx.strokeStyle = p.color || currentColor;
+        ctx.lineWidth = logicalWidth(p.line_width || currentLineWidth);
+        ctx.stroke();
+        break;
+      }
+      case 'draw_rectangle': {
+        const pos1 = logicalToPixel(p.x || 100, p.y || 100);
+        const pixelW = logicalWidth(p.w || 200);
+        const pixelH = logicalWidth(p.h || 200);
+        if (p.fill_color && p.fill_color !== 'none') {
+          ctx.fillStyle = p.fill_color;
+          ctx.fillRect(pos1.x, pos1.y, pixelW, pixelH);
+        }
+        ctx.strokeStyle = p.color || currentColor;
+        ctx.lineWidth = logicalWidth(p.line_width || currentLineWidth);
+        ctx.strokeRect(pos1.x, pos1.y, pixelW, pixelH);
+        break;
+      }
+      case 'draw_line': {
+        const pos1 = logicalToPixel(p.x1 || 0, p.y1 || 0);
+        const pos2 = logicalToPixel(p.x2 || 500, p.y2 || 500);
+        ctx.beginPath();
+        ctx.moveTo(pos1.x, pos1.y);
+        ctx.lineTo(pos2.x, pos2.y);
+        ctx.strokeStyle = p.color || currentColor;
+        ctx.lineWidth = logicalWidth(p.line_width || currentLineWidth);
+        ctx.stroke();
+        break;
+      }
+      case 'draw_triangle': {
+        const p1 = logicalToPixel(p.x1 || 500, p.y1 || 100);
+        const p2 = logicalToPixel(p.x2 || 300, p.y2 || 800);
+        const p3 = logicalToPixel(p.x3 || 700, p.y3 || 800);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.lineTo(p3.x, p3.y);
+        ctx.closePath();
+        if (p.fill_color && p.fill_color !== 'none') {
+          ctx.fillStyle = p.fill_color;
+          ctx.fill();
+        }
+        ctx.strokeStyle = p.color || currentColor;
+        ctx.lineWidth = logicalWidth(p.line_width || currentLineWidth);
+        ctx.stroke();
+        break;
+      }
+      case 'draw_text': {
+        const pos = logicalToPixel(p.x || 500, p.y || 500);
+        const fontSize = logicalWidth(p.size || 40);
+        ctx.font = `${fontSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+        ctx.fillStyle = p.color || currentColor;
+        ctx.textAlign = p.text_align || 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(p.text || '', pos.x, pos.y);
+        break;
+      }
+      case 'draw_ellipse': {
+        const pos = logicalToPixel(p.cx || 500, p.cy || 500);
+        const rx = logicalRadius(p.rx || 150);
+        const ry = logicalRadius(p.ry || 100);
+        ctx.beginPath();
+        ctx.ellipse(pos.x, pos.y, rx, ry, 0, 0, Math.PI * 2);
+        if (p.fill_color && p.fill_color !== 'none') {
+          ctx.fillStyle = p.fill_color;
+          ctx.fill();
+        }
+        ctx.strokeStyle = p.color || currentColor;
+        ctx.lineWidth = logicalWidth(p.line_width || currentLineWidth);
+        ctx.stroke();
+        break;
+      }
+      case 'draw_polygon': {
+        if (!p.points || p.points.length < 3) break;
+        const pts = p.points.map(pt => logicalToPixel(pt[0], pt[1]));
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) {
+          ctx.lineTo(pts[i].x, pts[i].y);
+        }
+        ctx.closePath();
+        if (p.fill_color && p.fill_color !== 'none') {
+          ctx.fillStyle = p.fill_color;
+          ctx.fill();
+        }
+        ctx.strokeStyle = p.color || currentColor;
+        ctx.lineWidth = logicalWidth(p.line_width || currentLineWidth);
+        ctx.stroke();
+        break;
+      }
+      case 'set_bg': {
+        bgColor = p.color || '#ffffff';
+        renderAll();
+        break;
+      }
+    }
+  }
+
+  /* ============================================================
+   *  5. 绘图操作执行引擎
+   * ============================================================ */
+
+  function executeCommand(cmd) {
+    if (!cmd || !cmd.type) {
+      console.warn('[Canvas] 无效指令:', cmd);
+      return { success: false, message: '无效指令格式' };
+    }
+
+    const type = cmd.type;
+    const params = cmd.params || {};
+
+    // 更新状态栏
+    updateStatus(type, params);
+
+    switch (type) {
+      case 'clear': {
+        undoStack.push([...shapes]);
+        shapes = [];
+        updateShapeCount();
+        renderAll();
+        return { success: true, message: '画布已清空' };
+      }
+      case 'undo': {
+        if (shapes.length > 0) {
+          undoStack.push(shapes.pop());
+          renderAll();
+          updateShapeCount();
+          return { success: true, message: '已撤销上一步操作' };
+        }
+        return { success: false, message: '没有可撤销的操作' };
+      }
+      case 'redo': {
+        if (undoStack.length > 0) {
+          const shape = undoStack.pop();
+          if (shape) {
+            shapes.push(shape);
+            renderAll();
+            updateShapeCount();
+            return { success: true, message: '已恢复撤销的操作' };
+          }
+        }
+        return { success: false, message: '没有可恢复的操作' };
+      }
+      case 'set_color': {
+        if (params.color) currentColor = params.color;
+        return { success: true, message: `当前画笔颜色已设置为 ${params.color}` };
+      }
+      case 'set_fill': {
+        if (params.color) currentFillColor = params.color;
+        return { success: true, message: `当前填充颜色已设置为 ${params.color}` };
+      }
+      case 'set_line_width': {
+        if (params.width) currentLineWidth = params.width;
+        return { success: true, message: `线条宽度已设置为 ${params.width}` };
+      }
+      case 'set_bg': {
+        if (params.color) {
+          bgColor = params.color;
+          renderAll();
+          return { success: true, message: `背景色已设置为 ${params.color}` };
+        }
+        return { success: false, message: '缺少颜色参数' };
+      }
+      case 'draw_circle':
+      case 'draw_rectangle':
+      case 'draw_line':
+      case 'draw_triangle':
+      case 'draw_text':
+      case 'draw_ellipse':
+      case 'draw_polygon': {
+        // 记录到形状列表
+        undoStack.push(null); // 占位，实际 undo 走 pop
+        shapes.push({ type, params });
+        renderAll();
+        updateShapeCount();
+        return { success: true, message: `已绘制 ${getShapeName(type)}` };
+      }
+      default: {
+        return { success: false, message: `不支持的指令类型: ${type}` };
+      }
+    }
+  }
+
+  function getShapeName(type) {
+    const names = {
+      'draw_circle': '圆形',
+      'draw_rectangle': '矩形',
+      'draw_line': '直线',
+      'draw_triangle': '三角形',
+      'draw_text': '文字',
+      'draw_ellipse': '椭圆',
+      'draw_polygon': '多边形'
+    };
+    return names[type] || type;
+  }
+
+  /* ============================================================
+   *  6. 批量执行指令 (支持复合指令)
+   * ============================================================ */
+
+  function executeCommands(commands) {
+    if (!Array.isArray(commands)) {
+      commands = [commands];
+    }
+
+    const results = [];
+    for (const cmd of commands) {
+      const result = executeCommand(cmd);
+      results.push(result);
+
+      // 如果不是最后一条，滚动更新状态
+      if (results.length < commands.length) {
+        updateHint(`✅ ${result.message} → 继续执行...`, true);
+      }
+    }
+
+    // 最后一条结果作为主反馈
+    const lastResult = results[results.length - 1];
+
+    // 隐藏欢迎覆盖层
+    welcomeOverlay.classList.add('hidden');
+
+    return {
+      success: lastResult.success,
+      message: lastResult.message,
+      results: results,
+      shapeCount: shapes.length
+    };
+  }
+
+  /* ============================================================
+   *  7. 状态可视化更新
+   * ============================================================ */
+
+  function updateStatus(type, params) {
+    const names = {
+      'clear': '🗑️ 清空画布',
+      'undo': '↩️ 撤销',
+      'redo': '↪️ 恢复',
+      'set_color': `🎨 设置颜色: ${params.color || ''}`,
+      'set_fill': `🖍️ 设置填充: ${params.color || ''}`,
+      'set_line_width': `✏️ 设置线宽: ${params.width || ''}`,
+      'set_bg': `🖼️ 设置背景: ${params.color || ''}`,
+      'draw_circle': '⭕ 绘制圆形',
+      'draw_rectangle': '⬛ 绘制矩形',
+      'draw_line': '📏 绘制直线',
+      'draw_triangle': '🔺 绘制三角形',
+      'draw_text': '🔤 添加文字',
+      'draw_ellipse': '🥚 绘制椭圆',
+      'draw_polygon': '⬡ 绘制多边形'
+    };
+    const label = names[type] || `🎯 ${type}`;
+    statusText.textContent = `🎨 ${label}`;
+  }
+
+  function updateShapeCount() {
+    shapeCountEl.textContent = `${shapes.length} 个图形`;
+  }
+
+  function updateHint(text, isActive) {
+    actionHint.textContent = text;
+    if (isActive) {
+      actionHint.classList.add('active');
+    } else {
+      actionHint.classList.remove('active');
+    }
+  }
+
+  /* ============================================================
+   *  8. postMessage 跨域消息监听接收器
+   * ============================================================ */
+
+  function handleMessage(event) {
+    // 验证消息来源 (可选)
+    // const allowedOrigins = ['https://www.coze.cn', 'https://www.coze.com'];
+    // if (!allowedOrigins.includes(event.origin)) return;
+
+    const data = event.data;
+
+    // 兼容字符串消息
+    let msg;
+    try {
+      msg = typeof data === 'string' ? JSON.parse(data) : data;
+    } catch (e) {
+      return; // 非 JSON 消息忽略
+    }
+
+    // 检查是否是绘图指令
+    if (!msg || msg.target !== 'ai-drawing-canvas' || !msg.command) return;
+
+    const command = msg.command;
+
+    // 更新提示
+    updateHint('⏳ 正在执行绘图指令...', true);
+
+    // 执行指令
+    const result = executeCommands(command);
+
+    // 更新提示
+    updateHint(`✅ ${result.message}`, true);
+
+    // 3秒后恢复默认提示
+    setTimeout(() => {
+      updateHint('💡 对我说出绘图的指令，例如"画一个红色的圆在正中间"', false);
+    }, 3000);
+
+    // 上报执行结果给父窗口
+    if (window.parent && window.parent !== window) {
+      const response = {
+        target: 'coze-canvas-response',
+        source: 'ai-drawing-canvas',
+        result: result
+      };
+      window.parent.postMessage(response, '*');
+    }
+
+    // 上报执行完成
+    reportStatus('success', result.message, shapes.length);
+  }
+
+  window.addEventListener('message', handleMessage);
+
+  /* ============================================================
+   *  9. 状态上报 (供父页面轮询或事件监听)
+   * ============================================================ */
+
+  function reportStatus(status, message, count) {
+    // 可通过 postMessage 上报
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        target: 'coze-canvas-status',
+        source: 'ai-drawing-canvas',
+        status: status,
+        message: message,
+        shapeCount: count,
+        timestamp: Date.now()
+      }, '*');
+    }
+  }
+
+  /* ============================================================
+   *  10. 初始化
+   * ============================================================ */
+
+  function init() {
+    resizeCanvas();
+    renderAll();
+    updateHint('💡 对我说出绘图的指令，例如"画一个红色的圆在正中间"', false);
+    statusText.textContent = '🎨 AI 语音绘图 - 等待指令...';
+
+    // 通知父页面画布已就绪
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        target: 'coze-canvas-ready',
+        source: 'ai-drawing-canvas',
+        status: 'ready',
+        logicalSize: LOGICAL_SIZE
+      }, '*');
+    }
+
+    console.log('[AI Drawing Canvas] 已就绪，坐标系: 0-1000');
+  }
+
+  // DOM 就绪后初始化
+  if (document.readyState === 'complete') {
+    init();
+  } else {
+    window.addEventListener('load', init);
+  }
+
+})();
+</script>
+</body>
+</html>
