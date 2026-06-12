@@ -875,18 +875,9 @@
   function init() {
     resizeCanvas();
 
-    // 自检：绘制一组示例图形，验证渲染引擎工作正常
-    const demoCommands = [
-      { type: 'draw_circle', params: { cx: 200, cy: 250, r: 120, color: '#FF6B6B', fill_color: '#FFE0E0' }},
-      { type: 'draw_rectangle', params: { x: 380, y: 130, w: 240, h: 240, color: '#4ECDC4', fill_color: '#E0F7F5' }},
-      { type: 'draw_triangle', params: { x1: 750, y1: 130, x2: 650, y2: 370, x3: 850, y3: 370, color: '#45B7D1', fill_color: '#D6EEF5' }},
-      { type: 'draw_line', params: { x1: 100, y1: 550, x2: 900, y2: 550, color: '#96CEB4', line_width: 6 }},
-      { type: 'draw_ellipse', params: { cx: 300, cy: 750, rx: 180, ry: 100, color: '#DDA0DD', fill_color: '#F3E5F5' }},
-      { type: 'draw_text', params: { x: 700, y: 780, text: 'AI语音绘图', color: '#667eea', size: 60 }},
-    ];
-    executeCommands(demoCommands);
-    updateHint('🎨 欢迎！试着对我说"画一个红色的圆在正中间"', false);
-    statusText.textContent = '🎨 AI 语音绘图 - 已就绪';
+    // 画布初始状态为空，等待用户语音指令
+    updateHint('🎤 按住麦克风按钮，用语音开始画画', false);
+    statusText.textContent = '🎨 AI 语音绘图 - 画布就绪';
     updateShapeCount();
 
     // 通知父页面画布已就绪
