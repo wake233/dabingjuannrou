@@ -420,6 +420,16 @@
         ctx.stroke();
         break;
       }
+      case 'draw_arc': {
+        const arcPos = logicalToPixel(p.cx || 500, p.cy || 500);
+        const arcR = pixelWidth(p.r || 100);
+        ctx.beginPath();
+        ctx.arc(arcPos.x, arcPos.y, arcR, p.startAngle || 0, p.endAngle || Math.PI);
+        ctx.strokeStyle = p.color || currentColor;
+        ctx.lineWidth = logicalWidth(p.line_width || currentLineWidth);
+        ctx.stroke();
+        break;
+      }
       case 'draw_triangle': {
         const p1 = logicalToPixel(p.x1 || 500, p.y1 || 100);
         const p2 = logicalToPixel(p.x2 || 300, p.y2 || 800);
@@ -557,6 +567,7 @@
       case 'draw_circle':
       case 'draw_rectangle':
       case 'draw_line':
+      case 'draw_arc':
       case 'draw_triangle':
       case 'draw_text':
       case 'draw_ellipse':
@@ -579,6 +590,7 @@
       'draw_circle': '圆形',
       'draw_rectangle': '矩形',
       'draw_line': '直线',
+      'draw_arc': '弧线',
       'draw_triangle': '三角形',
       'draw_text': '文字',
       'draw_ellipse': '椭圆',
@@ -633,6 +645,22 @@
             x1, y1, x2, y2,
             color: color || currentColor,
             line_width: lineWidth || currentLineWidth
+          }
+        });
+      }
+      case 'arc': {
+        const [ax, ay, ar, startAngle, endAngle, acolor, alineWidth] = args;
+        // 角度转弧度
+        const startRad = (startAngle || 0) * Math.PI / 180;
+        const endRad = (endAngle || 180) * Math.PI / 180;
+        return executeCommand({
+          type: 'draw_arc',
+          params: {
+            cx: ax, cy: ay, r: ar,
+            startAngle: startRad,
+            endAngle: endRad,
+            color: acolor || currentColor,
+            line_width: alineWidth || currentLineWidth
           }
         });
       }

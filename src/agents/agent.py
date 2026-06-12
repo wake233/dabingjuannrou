@@ -214,6 +214,7 @@ def convert_type_params_to_operate_args(commands):
       draw_circle {cx,cy,r,color,fill_color,line_width}   →  circle [x,y,r,fill,stroke,width]
       draw_rectangle {x,y,w,h,color,fill_color,line_width} →  rect [x,y,w,h,fill,stroke,width]
       draw_line {x1,y1,x2,y2,color,line_width}             →  line [x1,y1,x2,y2,color,width]
+      draw_arc {cx,cy,r,startAngle,endAngle,color,line_width} →  arc [x,y,r,start,end,color,width]
       clear {}                                               →  clear []
       undo {}                                                →  undo []
       set_color {color}                                     →  set_color [color]
@@ -265,6 +266,14 @@ def convert_type_params_to_operate_args(commands):
                 p.get('x1', 0), p.get('y1', 0), 
                 p.get('x2', 500), p.get('y2', 500),
                 p.get('color', '#333'), 
+                p.get('line_width', 4)
+            ]})
+        
+        elif t == 'draw_arc':
+            result.append({'operate': 'arc', 'args': [
+                p.get('cx', 500), p.get('cy', 500), p.get('r', 100),
+                p.get('startAngle', 0), p.get('endAngle', 180),
+                p.get('color', '#333'),
                 p.get('line_width', 4)
             ]})
         
