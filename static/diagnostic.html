@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>听画 - 语音识别诊断</title>
+  <style>
+    body { font-family: "Microsoft YaHei UI", sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; }
+    .pass { color: #22c55e; } .fail { color: #ef4444; } .warn { color: #eab308; }
+    .item { margin: 8px 0; padding: 8px; background: #f8fafc; border-radius: 8px; }
+    button { padding: 12px 24px; font-size: 16px; margin: 5px; border-radius: 8px; border: 1px solid #ccc; cursor: pointer; }
+    #log { margin-top: 20px; padding: 12px; background: #1e293b; color: #e2e8f0; border-radius: 8px; font-family: monospace; font-size: 12px; max-height: 300px; overflow: auto; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>🔍 听画语音识别诊断</h1>
+  <div id="results"></div>
+  <div>
+    <button onclick="runAll()">运行全部诊断</button>
+    <button onclick="testMic()">测试麦克风</button>
+    <button onclick="testSpeech()">测试浏览器识别</button>
+  </div>
+  <div id="log"></div>
+
+  <script>
+    const log = document.getElementById("log");
+    const results = document.getElementById("results");
+    function L(msg) { log.textContent += msg + "\n"; log.scrollTop = log.scrollHeight; console.log(msg); }
+    function R(id, status, msg) {
+      const cls = status === "pass" ? "pass" : status === "warn" ? "warn" : "fail";
+      results.innerHTML += `<div class="item"><span class="${cls}">${status === "pass" ? "✓" : status === "warn" ? "⚠" : "✗"}</span> ${msg}</div>`;
+    }
+
+    async function runAll() {
+      results.innerHTML = ""; log.textContent = "";
+      L("=== 听画语音识别诊断 ===");
+      L("User-Agent: " + navigator.userAgent);
+
+      // 1. Check protocol
+      const isLocalhost = location.hostname === "localhost" || location.hostname === "127.0.0.1" || location.hostname === "[::1]";
+      const isHTTPS = location.protocol === "https:";
+      if (isLocalhost || isHTTPS) {
+        R("proto", "pass", "协议: " + location.protocol + "//" + location.hostname + " (支持 getUserMedia)");
+      } else {
+        R("proto", "fail", "协议: " + location.protocol + "//" + location.hostname + " (需要 HTTPS 或 localhost)");
+      }
+
+      // 2. Check getUserMedia
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+        R("mic", "pass", "麦克风权限: 已授权");
+      } catch (e) {
+        R("mic", "fail", "麦克风权限: " + e.message);
+      }
+
+      // 3. Check Web Speech API
+      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (Recognition) {
+        R("webspeech", "pass", "Web Speech API: 可用");
+        L("  SpeechRecognition: " + (window.SpeechRecognition ? "标准" : "webkit"));
+        L("  SpeechRecognitionPhrase: " + (window.SpeechRecognitionPhrase || window.webkitSpeechRecognitionPhrase ? "可用" : "不可用"));
+      } else {
+        R("webspeech", "fail", "Web Speech API: 不可用 (仅 Chrome/Edge 支持)");
+      }
+
+      // 4. Check AudioContext
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        R("audiocontext", "pass", "AudioContext: 可用");
+      } else {
+        R("audiocontext", "fail", "AudioContext: 不可用");
+      }
+
+      // 5. Check MediaRecorder
+      if (window.MediaRecorder) {
+        R("mediarecorder", "pass", "MediaRecorder: 可用 (云端模式支持)");
+      } else {
+        R("mediarecorder", "fail", "MediaRecorder: 不可用 (云端模式不可用)");
+      }
+
+      // 6. Check speech synthesis (TTS)
+      if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+        R("tts", "pass", "TTS 语音播报: 可用");
+      } else {
+        R("tts", "warn", "TTS 语音播报: 不可用 (不影响识别，仅无语音反馈)");
+      }
+
+      // 7. Check API server
+      try {
+        const resp = await fetch("/api/status");
+        const status = await resp.json();
+        L("  API 服务: 在线 (apiVersion=" + status.apiVersion + ")");
+        L("  云端转写已配置: " + status.cloudTranscriptionConfigured);
+        L("  云端转写问题: " + (status.cloudTranscriptionIssue || "无"));
+        L("  命令模型已配置: " + status.commandModelConfigured);
+        if (status.cloudTranscriptionConfigured) {
+          R("api", "pass", "API 服务在线，云端转写已配置");
+        } else if (status.cloudTranscriptionIssue === "missing_api_key") {
+          R("api", "warn", "API 服务在线，但云端转写未配置 API Key (编辑 .env 文件)");
+        } else {
+          R("api", "warn", "API 服务在线，但云端转写配置不完整");
+        }
+      } catch (e) {
+        R("api", "fail", "API 服务不可达: " + e.message + " (请运行 python main.py)");
+      }
+
+      // 8. Summary
+      L("");
+      L("=== 诊断完成 ===");
+    }
+
+    async function testMic() {
+      L("--- 测试麦克风 ---");
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const AC = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AC();
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        const data = new Uint8Array(analyser.fftSize);
+        L("  请说话...");
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 200));
+          analyser.getByteTimeDomainData(data);
+          const level = Math.sqrt(data.reduce((s, v) => s + ((v - 128) / 128) ** 2, 0) / data.length);
+          if (level > 0.03) {
+            L("  ✓ 检测到声音 (level=" + level.toFixed(3) + ")");
+            stream.getTracks().forEach(t => t.stop());
+            ctx.close();
+            return;
+          }
+        }
+        L("  ✗ 未检测到声音 — 请检查麦克风是否工作");
+        stream.getTracks().forEach(t => t.stop());
+        ctx.close();
+      } catch (e) {
+        L("  ✗ 错误: " + e.message);
+      }
+    }
+
+    async function testSpeech() {
+      L("--- 测试浏览器语音识别 ---");
+      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!Recognition) {
+        L("  ✗ 浏览器不支持 Web Speech API，请使用 Chrome 或 Edge");
+        return;
+      }
+      const recog = new Recognition();
+      recog.lang = "zh-CN";
+      recog.continuous = false;
+      recog.interimResults = true;
+      recog.onstart = () => L("  ✓ 识别已启动，请说话...");
+      recog.onresult = (e) => {
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const r = e.results[i];
+          const text = r[0]?.transcript?.trim() || "";
+          L("  " + (r.isFinal ? "最终" : "中间") + "结果: \"" + text + "\" conf=" + r[0]?.confidence);
+        }
+      };
+      recog.onerror = (e) => L("  ✗ 错误: " + e.error + " — " + e.message);
+      recog.onend = () => L("  识别已结束 (3秒后自动停止)");
+      recog.start();
+      setTimeout(() => { try { recog.stop(); } catch(e) {} }, 3000);
+    }
+  </script>
+</body>
+</html>

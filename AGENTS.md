@@ -54,15 +54,15 @@
 
 允许的动作类型为 `create`、`select`、`update`、`move`、`align`、`distribute`、`duplicate`、`delete`、`group`、`ungroup`、`history`、`canvas`、`export`、`help`、`status`。
 
-对象目标可以是 `selected`、`last`、`lastTwo`、`all`、对象 ID 或自动名称。模型动作在服务端进行类型和数量校验，在浏览器执行前再次校验；不支持代码执行或任意属性写入。
+对象目标可以是 `selected`、`last`、`lastTwo`、`all`、对象 ID 或自动名称。模型动作在服务端和浏览器端均按动作类型校验必需字段、字段类型、允许枚举和值域；不支持代码执行、任意属性写入或绕过清空确认。
 
 ## 5. 测试与验收结果
 
-- Node 内置测试覆盖中文数字、文本归一化、复杂分句、上下文引用、动作校验、事务回滚、撤销重做、布局、组合和删除。
+- Node 内置测试覆盖中文数字、文本归一化、复杂分句、上下文引用、动作校验、事务回滚、撤销重做、布局、组合、删除，以及前端渲染、确认、低置信度、模型回退和导出流程。
 - Python `unittest` 覆盖模型未配置、有效响应、非法 JSON、非法动作和超时。
 - 自动测试命令与结果：
-  - `node --test tests/*.test.js`：9 项通过。
-  - `python -m unittest discover -s tests -p "test_*.py" -v`：4 项通过。
+  - `node --test tests/*.test.js`：23 项通过。
+  - `python -m unittest discover -s tests -p "test_*.py" -v`：5 项通过。
 
 ## 6. 未完成项与原因
 

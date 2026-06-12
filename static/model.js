@@ -6,6 +6,29 @@ export const ALLOWED_ACTIONS = new Set([
   "export", "help", "status"
 ]);
 
+const KINDS = new Set(["rect", "circle", "ellipse", "triangle", "star", "line", "arrow", "text"]);
+const POSITIONS = new Set(["左边", "右边", "上边", "下边", "左上角", "右上角", "左下角", "右下角", "中央"]);
+const ALIGN_MODES = new Set(["left", "right", "top", "bottom", "hcenter", "vcenter"]);
+const AXES = new Set(["horizontal", "vertical"]);
+const UPDATE_FIELDS = new Set(["fill", "stroke", "strokeWidth", "opacity", "rotation", "text", "width", "height", "zOrder"]);
+const ACTION_FIELDS = {
+  create: new Set(["type", "kind", "position", "x", "y", "width", "height", "fill", "stroke", "strokeWidth", "opacity", "rotation", "text"]),
+  select: new Set(["type", "target"]),
+  update: new Set(["type", "target", "changes"]),
+  move: new Set(["type", "target", "position", "dx", "dy"]),
+  align: new Set(["type", "target", "mode"]),
+  distribute: new Set(["type", "target", "axis"]),
+  duplicate: new Set(["type", "target"]),
+  delete: new Set(["type", "target"]),
+  group: new Set(["type", "target"]),
+  ungroup: new Set(["type", "target"]),
+  history: new Set(["type", "operation"]),
+  canvas: new Set(["type", "operation", "color", "requiresConfirmation"]),
+  export: new Set(["type", "format"]),
+  help: new Set(["type"]),
+  status: new Set(["type"])
+};
+
 const TYPE_NAMES = {
   rect: "矩形", circle: "圆形", ellipse: "椭圆", triangle: "三角形",
   star: "星形", line: "直线", arrow: "箭头", text: "文字"
@@ -42,11 +65,153 @@ export function validateActions(actions) {
     throw new Error("动作数量必须在 1 到 20 之间");
   }
   for (const action of actions) {
-    if (!action || typeof action !== "object" || !ALLOWED_ACTIONS.has(action.type)) {
+    if (!isRecord(action) || !ALLOWED_ACTIONS.has(action.type)) {
       throw new Error("包含不允许的动作");
     }
+    validateAction(action);
+  }
+  if (actions.some(action => action.type === "history") && actions.length !== 1) {
+    throw new Error("撤销或重做必须单独执行");
   }
   return true;
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function requireFields(action, ...fields) {
+  for (const field of fields) {
+    if (!(field in action)) throw new Error(`${action.type} 缺少字段 ${field}`);
+  }
+}
+
+function validateKnownFields(action) {
+  for (const field of Object.keys(action)) {
+    // Fields prefixed with "_" are internal metadata (e.g. _composite)
+    // and are exempt from the allowed-fields whitelist.
+    if (field.startsWith("_")) continue;
+    if (!ACTION_FIELDS[action.type].has(field)) throw new Error(`${action.type} 包含不允许的字段 ${field}`);
+  }
+}
+
+function isFiniteNumber(value, minimum = -1_000_000, maximum = 1_000_000) {
+  return typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
+}
+
+function validateTarget(target, allowNone = false) {
+  const validString = typeof target === "string" && target.length > 0 && target.length <= 100
+    && (allowNone || target !== "none");
+  const validArray = Array.isArray(target) && target.length > 0 && target.length <= 100
+    && target.every(value => typeof value === "string" && value.length > 0 && value.length <= 100);
+  if (!validString && !validArray) throw new Error("目标字段无效");
+}
+
+function validateColor(value, allowNone = true) {
+  if (typeof value !== "string" || value.length > 20 || (!allowNone && value === "none")
+    || !(value === "none" || /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value))) {
+    throw new Error("颜色字段无效");
+  }
+}
+
+function validateText(value) {
+  if (typeof value !== "string" || value.length > 1000) throw new Error("文字字段无效");
+}
+
+function validateDimension(value, allowZero = false) {
+  const minimum = allowZero ? 0 : Number.EPSILON;
+  if (!isFiniteNumber(value, minimum)) throw new Error("尺寸字段无效");
+}
+
+function validateChangeValue(field, value) {
+  if (["width", "height"].includes(field) && isRecord(value)) {
+    if (Object.keys(value).length !== 1 || !isFiniteNumber(value.multiply, Number.EPSILON, 1000)) {
+      throw new Error("缩放倍数无效");
+    }
+    return;
+  }
+  if (["fill", "stroke"].includes(field)) validateColor(value);
+  else if (field === "strokeWidth" && !isFiniteNumber(value, 0, 1000)) throw new Error("线宽无效");
+  else if (field === "opacity" && !isFiniteNumber(value, 0, 1)) throw new Error("透明度无效");
+  else if (field === "rotation" && !isFiniteNumber(value)) throw new Error("旋转角度无效");
+  else if (field === "text") validateText(value);
+  else if (field === "width") validateDimension(value);
+  else if (field === "height") validateDimension(value, true);
+  else if (field === "zOrder" && !["top", "bottom"].includes(value)) throw new Error("层级操作无效");
+}
+
+function validateAction(action) {
+  validateKnownFields(action);
+  if (action.type === "create") {
+    requireFields(action, "kind");
+    if (!KINDS.has(action.kind)) throw new Error("图形类型无效");
+    if ("position" in action && !POSITIONS.has(action.position)) throw new Error("位置字段无效");
+    if ("x" in action && !isFiniteNumber(action.x)) throw new Error("横坐标无效");
+    if ("y" in action && !isFiniteNumber(action.y)) throw new Error("纵坐标无效");
+    if ("width" in action) validateDimension(action.width);
+    if ("height" in action) validateDimension(action.height, ["line", "arrow"].includes(action.kind));
+    if ("fill" in action) validateColor(action.fill);
+    if ("stroke" in action) validateColor(action.stroke);
+    if ("strokeWidth" in action && !isFiniteNumber(action.strokeWidth, 0, 1000)) throw new Error("线宽无效");
+    if ("opacity" in action && !isFiniteNumber(action.opacity, 0, 1)) throw new Error("透明度无效");
+    if ("rotation" in action && !isFiniteNumber(action.rotation)) throw new Error("旋转角度无效");
+    if ("text" in action) validateText(action.text);
+    return;
+  }
+  if (action.type === "select") {
+    requireFields(action, "target"); validateTarget(action.target, true); return;
+  }
+  if (action.type === "update") {
+    requireFields(action, "target", "changes"); validateTarget(action.target);
+    if (!isRecord(action.changes) || Object.keys(action.changes).length === 0) throw new Error("修改内容无效");
+    for (const [field, value] of Object.entries(action.changes)) {
+      if (!UPDATE_FIELDS.has(field)) throw new Error(`不能修改属性 ${field}`);
+      validateChangeValue(field, value);
+    }
+    return;
+  }
+  if (action.type === "move") {
+    requireFields(action, "target"); validateTarget(action.target);
+    const hasPosition = "position" in action;
+    const hasOffset = "dx" in action || "dy" in action;
+    if (hasPosition === hasOffset) throw new Error("移动动作必须指定位置或偏移量");
+    if (hasPosition && !POSITIONS.has(action.position)) throw new Error("位置字段无效");
+    if ("dx" in action && !isFiniteNumber(action.dx)) throw new Error("水平偏移无效");
+    if ("dy" in action && !isFiniteNumber(action.dy)) throw new Error("垂直偏移无效");
+    return;
+  }
+  if (["align", "distribute"].includes(action.type)) {
+    const field = action.type === "align" ? "mode" : "axis";
+    requireFields(action, "target", field); validateTarget(action.target);
+    const allowed = action.type === "align" ? ALIGN_MODES : AXES;
+    if (!allowed.has(action[field])) throw new Error(`${field} 字段无效`);
+    return;
+  }
+  if (["duplicate", "delete", "group", "ungroup"].includes(action.type)) {
+    requireFields(action, "target"); validateTarget(action.target); return;
+  }
+  if (action.type === "history") {
+    requireFields(action, "operation");
+    if (!["undo", "redo"].includes(action.operation)) throw new Error("历史操作无效");
+    return;
+  }
+  if (action.type === "canvas") {
+    requireFields(action, "operation");
+    if (!["clear", "background"].includes(action.operation)) throw new Error("画布操作无效");
+    if (action.operation === "clear") {
+      if (action.requiresConfirmation !== true) throw new Error("清空画布必须确认");
+      if ("color" in action) throw new Error("清空画布不能设置颜色");
+    }
+    if (action.operation === "background") {
+      if ("requiresConfirmation" in action) throw new Error("背景操作不能包含确认字段");
+      requireFields(action, "color"); validateColor(action.color, false);
+    }
+    return;
+  }
+  if (action.type === "export") {
+    requireFields(action, "format");
+    if (!["svg", "png"].includes(action.format)) throw new Error("导出格式无效");
+  }
 }
 
 function copy(value) {

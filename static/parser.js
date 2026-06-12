@@ -7,11 +7,64 @@ const COLORS = {
 };
 const KINDS = {
   矩形: "rect", 方形: "rect", 长方形: "rect", 圆形: "circle", 圆: "circle",
-  椭圆: "ellipse", 三角形: "triangle", 三角: "triangle", 星形: "star", 星星: "star",
+  椭圆: "ellipse", 椭圆形: "ellipse", 三角形: "triangle", 三角: "triangle",
+  星形: "star", 星星: "star", 五角形: "star", 五角星: "star",
   直线: "line", 线条: "line", 箭头: "arrow", 文字: "text", 文本: "text"
 };
 const POSITIONS = ["左上角", "右上角", "左下角", "右下角", "中央", "中间", "左边", "右边", "上边", "下边"];
 const CN_DIGITS = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+
+// ── Homophone / near-homophone fuzzy correction table ──────────
+// Sorted by descending key length at runtime (longest phrase matched first).
+const FUZZY_MAP = Object.freeze(Object.fromEntries(Object.entries({
+  // ── Action words (画/创建/删除/撤销/重做/移动/复制/填充/描边) ──
+  "花一个": "画一个", "花矩形": "画矩形", "华图": "画图", "华圆": "画圆",
+  "花椭圆": "画椭圆", "花三角形": "画三角形", "花线": "画线",
+  "花文字": "画文字", "华一个": "画一个",
+  // ── Shape words (形状名) ──
+  "局型": "矩形", "方型": "方形", "园形": "圆形", "椭圆型": "椭圆形",
+  "三脚型": "三角形", "五角型": "五角形", "矩型": "矩形", "圆型": "圆形",
+  "三角型": "三角形", "星型": "星形", "箭型": "箭形",
+  // ── Operation words (操作词) ──
+  "三除": "删除", "山除": "删除", "撤消": "撤销", "鼎部": "顶部",
+  "低部": "底部", "举重": "居中", "缩方": "缩放", "悬转": "旋转",
+  "一副": "移动", "拷贝": "复制", "天充": "填充", "苗边": "描边",
+  // ── Colors (颜色) ──
+  "黄涩": "黄色", "兰色": "蓝色", "滤色": "绿色", "成色": "橙色",
+  "自色": "紫色", "粉涩": "粉色", "白涩": "白色", "黑涩": "黑色",
+  "红涩": "红色", "宗色": "棕色",
+  // ── Position / direction (位置/方向) ──
+  "又边": "右边", "中样": "中央", "坐上方": "左上角",
+  "又上方": "右上角", "坐下": "左下角", "又下": "右下角",
+  // ── Quantity / common (数量/其他) ──
+  "一个": "一个", "两个": "两个", "三个": "三个",
+  // ── Additional common errors (额外常误) ──
+  "青空": "清空", "抱存": "保存", "倒出": "导出", "背色": "背景色",
+  "画部": "画布", "背井": "背景", "钱宽": "线宽",
+  "头明度": "透明度", "全不": "全部", "所又": "所有",
+  "取消选择": "取消选择", "选的": "选择", "帮助": "帮助",
+  "撞态": "状态", "对齐": "对齐", "分步": "分布", "主合": "组合",
+  "打组": "打组", "方形": "方形", "开始画": "开始画",
+  "灰度": "灰色",
+  // ── Expanded homophone coverage ──
+  "花星形": "画星形", "花箭": "画箭", "华一个矩形": "画一个矩形",
+  "花圆形": "画圆形", "画局型": "画矩形", "删出": "删除",
+  "移出": "移动", "三解形": "三角形", "变框": "边框",
+  "退色": "褪色", "透民度": "透明度", "去消": "取消",
+  "线款": "线宽", "背静": "背景", "花步": "画布",
+  "青除": "清除", "起用": "启用",
+}).sort(([a], [b]) => b.length - a.length)));
+
+function fuzzyCorrect(text) {
+  let result = text;
+  for (const [wrong, correct] of Object.entries(FUZZY_MAP)) {
+    if (result.includes(wrong)) {
+      result = result.replaceAll(wrong, correct);
+    }
+  }
+  return result;
+}
+
 function chineseIndex(number) {
   const digits = "零一二三四五六七八九";
   if (number < 10) return digits[number];
@@ -34,13 +87,136 @@ export function chineseNumber(value) {
 }
 
 export function normalizeText(text) {
-  return text.trim().replace(/[，。！？、]/g, " 然后 ").replace(/\s+/g, " ")
+  const quotes = [];
+  const guarded = text.trim().replace(/[“”「」"][^“”「」"]*?[“”「」"]/g, (match) => {
+    quotes.push(match);
+    return `\x00Q${quotes.length - 1}\x00`;
+  });
+  // Replace Chinese punctuation with " 然后 ", but avoid creating
+  // duplicate "然后" sequences (e.g. "，然后" → " 然后 然后").
+  const normalized = guarded
+    .replace(/[。！？、]/g, " 然后 ")
+    .replace(/，(?:\s*然后)?/g, " 然后 ")
+    .replace(/\s+/g, " ")
     .replace(/正方形/g, "方形").replace(/正中央/g, "中央").replace(/中间/g, "中央")
     .replace(/撤消/g, "撤销").replace(/删掉/g, "删除").replace(/拷贝/g, "复制");
+  return normalized.replace(/\x00Q(\d+)\x00/g, (_, i) => quotes[Number(i)]);
 }
 
-export function splitCommands(text) {
-  return normalizeText(text).split(/\s*(?:然后|并且|接着|随后|再(?=画|创建|选|把|将|向|往|顶部|底部|左|右|水平|垂直|保存|复制|删除|置|组合|取消组合))\s*/).filter(Boolean);
+export function splitCommands(text, alreadyNormalized = false) {
+  const normalized = alreadyNormalized ? text : normalizeText(text);
+  return normalized.split(/\s*(?:然后|并且|接着|随后|再(?=画|创建|选|把|将|向|往|顶部|底部|左|右|水平|垂直|保存|复制|删除|置|组合|取消组合))\s*/).filter(Boolean);
+}
+
+// Sorted by key length descending so "椭圆形" matches before "圆"
+const KINDS_SORTED = Object.entries(KINDS).sort(([a], [b]) => b.length - a.length);
+
+function shapeKindFromText(text) {
+  const matches = KINDS_SORTED.filter(([keyword]) => text.includes(keyword));
+  // Prefer longest-matching keyword (e.g. "椭圆形" → "椭圆" over "圆形")
+  matches.sort(([a], [b]) => b.length - a.length);
+  return matches[0]?.[1] || null;
+}
+
+const SHAPE_DEFAULTS = {
+  rect: { width: 200, height: 150 },
+  circle: { width: 160, height: 160 },
+  ellipse: { width: 200, height: 110 },
+  triangle: { width: 200, height: 140 },
+  star: { width: 160, height: 160 },
+  line: { width: 180, height: 0 },
+  arrow: { width: 180, height: 0 },
+  text: { width: 220, height: 60 }
+};
+
+export function decomposeComposite(text) {
+  const normalized = normalizeText(text).trim();
+
+  const housePattern = /^(?:画(?:一个)?(?:房子|房屋))\s*$/;
+  if (housePattern.test(normalized)) {
+    const cx = 500, cy = 350;
+    const wallW = 200, wallH = 150;
+    return [
+      { type: "create", kind: "triangle", x: cx - wallW / 2, y: cy - wallH / 2 - 140, width: wallW, height: 140, fill: "#eab308" },
+      { type: "create", kind: "rect", x: cx - wallW / 2, y: cy - wallH / 2, width: wallW, height: wallH, fill: "#f97316" },
+      { type: "create", kind: "rect", x: cx - 30, y: cy + wallH / 2 - 70, width: 60, height: 70, fill: "#78350f" }
+    ];
+  }
+
+  const snowmanPattern = /^(?:画(?:一个)?雪人)\s*$/;
+  if (snowmanPattern.test(normalized)) {
+    const cx = 500;
+    return [
+      { type: "create", kind: "circle", x: cx - 60, y: 390, width: 120, height: 120, fill: "#ffffff", stroke: "#26364a" },
+      { type: "create", kind: "circle", x: cx - 40, y: 300, width: 80, height: 80, fill: "#ffffff", stroke: "#26364a" },
+      { type: "create", kind: "circle", x: cx - 25, y: 225, width: 50, height: 50, fill: "#ffffff", stroke: "#26364a" }
+    ];
+  }
+
+  const smileyPattern = /^(?:画(?:一个)?笑脸)\s*$/;
+  if (smileyPattern.test(normalized)) {
+    const cx = 500, cy = 350;
+    return [
+      { type: "create", kind: "circle", x: cx - 80, y: cy - 80, width: 160, height: 160, fill: "#eab308", stroke: "#26364a" },
+      { type: "create", kind: "circle", x: cx - 50 - 10, y: cy - 40, width: 20, height: 20, fill: "#111827", stroke: "none" },
+      { type: "create", kind: "circle", x: cx + 50 - 10, y: cy - 40, width: 20, height: 20, fill: "#111827", stroke: "none" },
+      { type: "create", kind: "ellipse", x: cx - 40, y: cy + 30, width: 80, height: 30, fill: "none", stroke: "#111827", strokeWidth: 3 }
+    ];
+  }
+
+  const rowPattern = /^画一排([零一二两三四五六七八九十百\d]+)个(.+)$/;
+  const rowMatch = normalized.match(rowPattern);
+  if (rowMatch) {
+    const count = chineseNumber(rowMatch[1]);
+    const kind = shapeKindFromText(rowMatch[2]);
+    if (kind && count >= 1 && count <= 20) {
+      const size = SHAPE_DEFAULTS[kind];
+      const spacing = size.width * 1.5;
+      const totalW = count * size.width + (count - 1) * spacing;
+      const startX = 500 - totalW / 2;
+      const centerY = 350 - size.height / 2;
+      const actions = [];
+      for (let i = 0; i < count; i++) {
+        actions.push({
+          type: "create",
+          kind,
+          x: startX + i * (size.width + spacing),
+          y: centerY,
+          width: size.width,
+          height: size.height
+        });
+      }
+      return actions;
+    }
+  }
+
+  const colPattern = /^画一列([零一二两三四五六七八九十百\d]+)个(.+)$/;
+  const colMatch = normalized.match(colPattern);
+  if (colMatch) {
+    const count = chineseNumber(colMatch[1]);
+    const kind = shapeKindFromText(colMatch[2]);
+    if (kind && count >= 1 && count <= 20) {
+      const size = SHAPE_DEFAULTS[kind];
+      const spacing = size.height * 1.5;
+      const totalH = count * size.height + (count - 1) * spacing;
+      const startY = 350 - totalH / 2;
+      const centerX = 500 - size.width / 2;
+      const actions = [];
+      for (let i = 0; i < count; i++) {
+        actions.push({
+          type: "create",
+          kind,
+          x: centerX,
+          y: startY + i * (size.height + spacing),
+          width: size.width,
+          height: size.height
+        });
+      }
+      return actions;
+    }
+  }
+
+  return null;
 }
 
 function colorFrom(text) {
@@ -85,7 +261,7 @@ function parseClause(clause, context) {
     return [{ type: "export", format: /svg/i.test(clause) ? "svg" : "png" }];
   }
 
-  const kindEntry = Object.entries(KINDS).find(([name]) => clause.includes(name));
+  const kindEntry = KINDS_SORTED.find(([name]) => clause.includes(name));
   if (kindEntry && /画|创建|添加|生成|来一个/.test(clause)) {
     const position = POSITIONS.find(p => clause.includes(p))?.replace("中间", "中央");
     const action = { type: "create", kind: kindEntry[1] };
@@ -163,7 +339,26 @@ function parseClause(clause, context) {
 
 export function parseCommand(text, initialContext = {}) {
   const context = { selected: Boolean(initialContext.selected) };
-  const actions = splitCommands(text).flatMap(clause => parseClause(clause, context));
+  const corrected = fuzzyCorrect(text);
+  const normalized = normalizeText(corrected);
+  // Split into clauses, then try decomposeComposite on EACH clause.
+  // This fixes DESIGN.md §4.2 / §7.8: composite commands like "画一个房子"
+  // could not previously be mixed with other clauses ("然后移动到右边").
+  // We must split FIRST because decomposeComposite patterns use .+ which is
+  // greedy and would consume subsequent clauses as part of the shape description.
+  let compositeSeq = 0;
+  const actions = splitCommands(normalized, true).flatMap(clause => {
+    const composite = decomposeComposite(clause.trim());
+    if (composite) {
+      // Mark composite-generated actions with a shared _compositeId so
+      // needsRiskConfirmation can treat each composite group as one
+      // semantic unit, preventing false confirmation triggers for
+      // single-intent commands like "画一个房子".
+      const gid = ++compositeSeq;
+      return composite.map(action => ({ ...action, _compositeId: gid }));
+    }
+    return parseClause(clause.trim(), context);
+  });
   validateActions(actions);
   return actions;
 }

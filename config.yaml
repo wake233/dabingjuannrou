@@ -1,0 +1,7 @@
+speech_to_text:
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  model: qwen3-asr-flash
+
+command_model:
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  model: qwen-plus
