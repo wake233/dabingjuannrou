@@ -47,6 +47,17 @@ function colorFrom(text) {
   return Object.entries(COLORS).find(([name]) => text.includes(name))?.[1];
 }
 
+function colorAfter(text, words) {
+  const names = Object.keys(COLORS).join("|");
+  const match = text.match(new RegExp(`(?:${words})(?:改成|设为|设置为|是|为)?(${names})`));
+  return match ? COLORS[match[1]] : null;
+}
+
+function colorWithoutStroke(text) {
+  const names = Object.keys(COLORS).join("|");
+  return colorFrom(text.replace(new RegExp(`(?:描边|边框|轮廓)(?:改成|设为|设置为|是|为)?(?:${names})`, "g"), ""));
+}
+
 function numberAfter(text, words) {
   const match = text.match(new RegExp(`(?:${words})([零一二两三四五六七八九十百\\d.]+)`));
   return match ? chineseNumber(match[1]) : null;
@@ -54,7 +65,8 @@ function numberAfter(text, words) {
 
 function targetFrom(text, context) {
   if (/刚才两个|上两个|最近两个/.test(text)) return "lastTwo";
-  if (/所有|全部|这些图形|它们|整体/.test(text)) return context.selected ? "selected" : "all";
+  if (/所有|全部/.test(text)) return "all";
+  if (/这些图形|它们|整体/.test(text)) return "selected";
   if (/它|这个|选中/.test(text)) return "selected";
   const named = text.match(/(矩形|圆形|椭圆|三角形|星形|直线|箭头|文字)([一二两三四五六七八九十\d]+)/);
   if (named) return `${named[1]}${chineseIndex(chineseNumber(named[2]))}`;
@@ -77,8 +89,10 @@ function parseClause(clause, context) {
   if (kindEntry && /画|创建|添加|生成|来一个/.test(clause)) {
     const position = POSITIONS.find(p => clause.includes(p))?.replace("中间", "中央");
     const action = { type: "create", kind: kindEntry[1] };
-    const color = colorFrom(clause);
-    if (color) action.fill = color;
+    const fill = colorAfter(clause, "填充|颜色") || colorWithoutStroke(clause);
+    const stroke = colorAfter(clause, "描边|边框|轮廓");
+    if (fill) action.fill = fill;
+    if (stroke) action.stroke = stroke;
     if (position) action.position = position;
     const width = numberAfter(clause, "宽(?:度)?");
     const height = numberAfter(clause, "高(?:度)?");
@@ -126,9 +140,12 @@ function parseClause(clause, context) {
   const changes = {};
   const textValue = clause.match(/(?:写上|内容是|文字是)[“"「]?(.+?)[”"」]?(?:放在|$)/)?.[1]?.trim();
   if (textValue) changes.text = textValue;
-  const color = colorFrom(clause);
-  if (color && /填充|颜色|改成|变成/.test(clause)) changes.fill = color;
-  if (color && /描边|边框|轮廓/.test(clause)) changes.stroke = color;
+  const fill = colorAfter(clause, "填充|颜色");
+  const stroke = colorAfter(clause, "描边|边框|轮廓");
+  const genericColor = colorFrom(clause);
+  if (fill) changes.fill = fill;
+  else if (genericColor && /改成|变成/.test(clause) && !/描边|边框|轮廓/.test(clause)) changes.fill = genericColor;
+  if (stroke) changes.stroke = stroke;
   const strokeWidth = numberAfter(clause, "线宽|描边宽度");
   if (strokeWidth) changes.strokeWidth = strokeWidth;
   const rotation = numberAfter(clause, "旋转");
@@ -144,8 +161,8 @@ function parseClause(clause, context) {
   throw new Error(`无法理解“${clause}”`);
 }
 
-export function parseCommand(text) {
-  const context = { selected: false };
+export function parseCommand(text, initialContext = {}) {
+  const context = { selected: Boolean(initialContext.selected) };
   const actions = splitCommands(text).flatMap(clause => parseClause(clause, context));
   validateActions(actions);
   return actions;

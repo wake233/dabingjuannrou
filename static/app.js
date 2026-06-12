@@ -120,7 +120,7 @@ async function handleCommand(rawText, confidence = 1) {
     if (/取消/.test(rawText)) { clearTimeout(confirmationTimer); pendingConfirmation = null; return say("已取消清空"); }
   }
   let actions;
-  try { actions = parseCommand(rawText); }
+  try { actions = parseCommand(rawText, { selected: engine.state.selection.length > 0 }); }
   catch {
     try { actions = await llmFallback(rawText); }
     catch (error) { return say(`${error.message}。请改用标准指令`); }

@@ -73,6 +73,20 @@ function requireTargets(state, target, minimum = 1) {
   return found;
 }
 
+function reconcileGroups(state) {
+  for (const [groupId, memberIds] of Object.entries(state.groups)) {
+    const members = state.objects.filter(o => memberIds.includes(o.id));
+    if (members.length < 2) {
+      members.forEach(o => { if (o.groupId === groupId) delete o.groupId; });
+      delete state.groups[groupId];
+      continue;
+    }
+    state.groups[groupId] = members.map(o => o.id);
+  }
+  const validGroups = new Set(Object.keys(state.groups));
+  state.objects.forEach(o => { if (o.groupId && !validGroups.has(o.groupId)) delete o.groupId; });
+}
+
 function positionFor(name, width, height) {
   const gap = 45;
   const positions = {
@@ -197,10 +211,18 @@ function applyAction(state, action) {
     const ids = new Set(requireTargets(state, action.target).map(o => o.id));
     state.objects = state.objects.filter(o => !ids.has(o.id));
     state.selection = state.selection.filter(id => !ids.has(id));
+    state.lastCreated = state.lastCreated.filter(id => !ids.has(id));
+    reconcileGroups(state);
     return;
   }
   if (action.type === "group") {
     const targets = requireTargets(state, action.target, 2);
+    const targetIds = new Set(targets.map(o => o.id));
+    for (const [groupId, memberIds] of Object.entries(state.groups)) {
+      state.groups[groupId] = memberIds.filter(id => !targetIds.has(id));
+    }
+    targets.forEach(o => { delete o.groupId; });
+    reconcileGroups(state);
     const groupId = `group-${state.nextGroupId++}`;
     state.groups[groupId] = targets.map(o => o.id);
     targets.forEach(o => { o.groupId = groupId; });
