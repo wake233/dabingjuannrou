@@ -205,19 +205,22 @@ def build_agent(ctx=None):
 #  格式转换: type/params → operate/args
 # ============================================================
 
-_TYPE_TO_OPERATE = {
-    'draw_circle': 'circle',
-    'draw_rectangle': 'rect',
-    'draw_line': 'line',
-    'draw_triangle': 'line',
-    'draw_ellipse': 'circle',
-    'clear': 'clear',
-    'undo': 'clear',
-    'set_bg': 'rect',
-}
-
 def convert_type_params_to_operate_args(commands):
-    """将 [{type, params}] 转为 [{operate, args}]"""
+    """将 [{type, params}] 转为 [{operate, args}] — Coze JS 节点直接消费的纯净 JSON 数组
+    
+    映射表:
+      type/params                        →  operate/args
+      ─────────────────────────────────────────────────────
+      draw_circle {cx,cy,r,color,fill_color,line_width}   →  circle [x,y,r,fill,stroke,width]
+      draw_rectangle {x,y,w,h,color,fill_color,line_width} →  rect [x,y,w,h,fill,stroke,width]
+      draw_line {x1,y1,x2,y2,color,line_width}             →  line [x1,y1,x2,y2,color,width]
+      clear {}                                               →  clear []
+      undo {}                                                →  undo []
+      set_color {color}                                     →  set_color [color]
+      set_fill {fill}                                       →  set_fill [fill]
+      set_line_width {line_width}                           →  set_line_width [width]
+      set_bg {color}                                        →  set_bg [color]
+    """
     if not isinstance(commands, list):
         return commands
     
@@ -226,6 +229,7 @@ def convert_type_params_to_operate_args(commands):
         if not isinstance(cmd, dict):
             result.append(cmd)
             continue
+        # 已经是新格式，直接保留
         if 'operate' in cmd:
             result.append(cmd)
             continue
@@ -234,33 +238,88 @@ def convert_type_params_to_operate_args(commands):
         p = cmd.get('params', {})
         
         if t == 'draw_circle':
+            fill = p.get('fill_color') or ''
+            if not fill:
+                fill = p.get('color', '#333')
             result.append({'operate': 'circle', 'args': [
                 p.get('cx', 500), p.get('cy', 500), p.get('r', 100),
-                p.get('fill_color') or p.get('color', '#333'),
-                p.get('color', '#333'), p.get('line_width', 4)
+                fill,
+                p.get('color', '#333'), 
+                p.get('line_width', 4)
             ]})
+        
         elif t == 'draw_rectangle':
+            fill = p.get('fill_color') or ''
+            if not fill:
+                fill = p.get('color', '#333')
             result.append({'operate': 'rect', 'args': [
-                p.get('x', 100), p.get('y', 100), p.get('w', 200), p.get('h', 200),
-                p.get('fill_color') or p.get('color', '#333'),
-                p.get('color', '#333'), p.get('line_width', 4)
+                p.get('x', 100), p.get('y', 100), 
+                p.get('w', 200), p.get('h', 200),
+                fill,
+                p.get('color', '#333'), 
+                p.get('line_width', 4)
             ]})
+        
         elif t == 'draw_line':
             result.append({'operate': 'line', 'args': [
-                p.get('x1', 0), p.get('y1', 0), p.get('x2', 500), p.get('y2', 500),
-                p.get('color', '#333'), p.get('line_width', 4)
+                p.get('x1', 0), p.get('y1', 0), 
+                p.get('x2', 500), p.get('y2', 500),
+                p.get('color', '#333'), 
+                p.get('line_width', 4)
             ]})
+        
         elif t == 'clear':
             result.append({'operate': 'clear', 'args': []})
-        elif t in ('draw_triangle', 'draw_ellipse', 'draw_text', 'draw_polygon'):
-            result.append({'operate': 'line', 'args': [
-                p.get('x1', 0) or p.get('cx', 500) or p.get('x', 500),
-                p.get('y1', 0) or p.get('cy', 500) or p.get('y', 500),
-                p.get('x2', 500) or p.get('cx', 500) + 100,
-                p.get('y2', 500) or p.get('cy', 500),
-                p.get('color', '#333'), p.get('line_width', 4)
+        
+        elif t == 'undo':
+            result.append({'operate': 'undo', 'args': []})
+        
+        elif t == 'set_color':
+            result.append({'operate': 'set_color', 'args': [p.get('color', 'black')]})
+        
+        elif t == 'set_fill':
+            result.append({'operate': 'set_fill', 'args': [p.get('fill', 'none')]})
+        
+        elif t == 'set_line_width':
+            result.append({'operate': 'set_line_width', 'args': [p.get('line_width', 4)]})
+        
+        elif t == 'set_bg':
+            result.append({'operate': 'set_bg', 'args': [p.get('color', 'white')]})
+        
+        elif t in ('draw_triangle',):
+            # 三角形 → 三条线
+            pts = [
+                (p.get('x1', 300), p.get('y1', 100)),
+                (p.get('x2', 300), p.get('y2', 700)),
+                (p.get('x3', 700), p.get('y3', 700)),
+            ]
+            for i in range(3):
+                x1, y1 = pts[i]
+                x2, y2 = pts[(i + 1) % 3]
+                result.append({'operate': 'line', 'args': [
+                    x1, y1, x2, y2,
+                    p.get('color', '#333'), p.get('line_width', 4)
+                ]})
+        
+        elif t in ('draw_ellipse',):
+            result.append({'operate': 'draw_ellipse', 'args': [
+                p.get('cx', 500), p.get('cy', 500),
+                p.get('rx', 150), p.get('ry', 100),
+                p.get('fill_color') or p.get('color', '#333'),
+                p.get('color', '#333'),
+                p.get('line_width', 4)
             ]})
+        
+        elif t == 'draw_text':
+            result.append({'operate': 'draw_text', 'args': [
+                p.get('text', 'Hello'),
+                p.get('x', 500), p.get('y', 500),
+                p.get('color', '#333'),
+                p.get('font_size', 24)
+            ]})
+        
         else:
+            # 未知指令，原样保留
             result.append(cmd)
     
     return result

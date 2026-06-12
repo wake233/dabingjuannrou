@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-12 11:03:39",
+  "timestamp": "2026-06-12 11:12:51",
   "total": 13,
   "passed": 13,
   "failed": 0,
@@ -39,7 +39,7 @@
       "name": "场景-画一朵花",
       "input": "画一朵花",
       "passed": true,
-      "error": "无指令(允许)"
+      "error": ""
     },
     {
       "name": "复合指令-三步",
@@ -81,7 +81,7 @@
       "name": "口语-撤销",
       "input": "撤销上一步",
       "passed": true,
-      "error": "无指令(允许)"
+      "error": ""
     }
   ]
 }
