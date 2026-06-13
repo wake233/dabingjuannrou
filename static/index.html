@@ -21,11 +21,6 @@
         <span class="panel-kicker">语音控制台</span>
         <div id="mode-indicator" class="mode-indicator"><span aria-hidden="true"></span>云端识别</div>
       </div>
-      <button id="mode-switch-button" type="button" class="mode-switch" aria-label="切换识别模式" title="切换识别模式">切换模式</button>
-      <div id="download-progress" class="download-progress" hidden>
-        <div id="download-progress-fill" class="download-progress-fill"></div>
-        <span id="download-progress-text">下载中...</span>
-      </div>
       <div class="voice-controls">
         <button id="listen-button" type="button" aria-label="授权麦克风并开始聆听" aria-pressed="false">
           <span class="mic-icon" aria-hidden="true">
@@ -40,7 +35,7 @@
         </div>
       </div>
       <div id="fallback-panel" class="fallback-panel" hidden>
-        <button id="fallback-browser" type="button">使用浏览器识别</button>
+        <button id="retry-cloud" type="button">重试云端识别</button>
         <button id="fallback-stop" type="button">停止聆听</button>
       </div>
     </section>

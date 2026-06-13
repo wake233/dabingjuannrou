@@ -463,7 +463,7 @@ blockquote {
 }
 
 .examples li::before {
-  content: "¡¤";
+  content: "Â·";
   position: absolute;
   left: 11px;
   color: var(--vermilion);
@@ -576,46 +576,4 @@ blockquote {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
   }
-}
-
-.listening-wave.background { display: flex; opacity: .55; }
-.listening-wave.background i { animation: waveBg 1.6s ease-in-out infinite alternate; }
-.listening-wave.background i:nth-child(2),
-.listening-wave.background i:nth-child(4) { animation-delay: .4s; }
-.listening-wave.background i:nth-child(3) { animation-delay: .8s; }
-@keyframes waveBg { to { height: 16px; background: var(--muted); } }
-#canvas-shell { transition: border-color .3s ease; }
-.mode-switch,
-.download-model {
-  padding: 8px 14px;
-  border-radius: 10px;
-  color: var(--ink);
-  background: var(--paper-deep);
-  font-size: 11px;
-  white-space: nowrap;
-}
-.download-model { color: #7c4b20; background: #f7e8c8; }
-.download-model[hidden],
-.download-progress[hidden] { display: none; }
-.download-progress {
-  position: relative;
-  width: 160px;
-  height: 10px;
-  overflow: hidden;
-  border-radius: 5px;
-  background: var(--paper-deep);
-}
-.download-progress-fill {
-  width: 0;
-  height: 100%;
-  border-radius: 5px;
-  background: var(--vermilion);
-  transition: width .3s ease;
-}
-#download-progress-text {
-  display: block;
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 10px;
-  text-align: center;
 }

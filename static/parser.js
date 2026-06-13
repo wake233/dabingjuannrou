@@ -265,7 +265,7 @@ function parseClause(clause, context) {
   if (/^(帮助|有什么指令|怎么使用)/.test(clause)) return [{ type: "help" }];
   if (/^(当前状态|画布状态|有什么图形)/.test(clause)) return [{ type: "status" }];
   if (/取消选择/.test(clause)) return [{ type: "select", target: "none" }];
-  if (/清空画布|清除画布|全部清空/.test(clause)) return [{ type: "canvas", operation: "clear", requiresConfirmation: true }];
+  if (/清空画布|清除画布|全部清空/.test(clause)) return [{ type: "canvas", operation: "clear" }];
   if (/背景/.test(clause) && colorFrom(clause)) return [{ type: "canvas", operation: "background", color: colorFrom(clause) }];
   if (/保存|导出|下载/.test(clause)) {
     return [{ type: "export", format: /svg/i.test(clause) ? "svg" : "png" }];
@@ -361,8 +361,7 @@ export function parseCommand(text, initialContext = {}) {
     const composite = decomposeComposite(clause.trim());
     if (composite) {
       // Mark composite-generated actions with a shared _compositeId so
-      // needsRiskConfirmation can treat each composite group as one
-      // semantic unit, preventing false confirmation triggers for
+      // each composite group is treated as one semantic unit for
       // single-intent commands like "画一个房子".
       const gid = ++compositeSeq;
       context.composite = true;

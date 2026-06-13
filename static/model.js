@@ -27,7 +27,7 @@ const ACTION_FIELDS = {
   group: new Set(["type", "target"]),
   ungroup: new Set(["type", "target"]),
   history: new Set(["type", "operation"]),
-  canvas: new Set(["type", "operation", "color", "requiresConfirmation"]),
+  canvas: new Set(["type", "operation", "color"]),
   export: new Set(["type", "format"]),
   help: new Set(["type"]),
   status: new Set(["type"])
@@ -228,11 +228,9 @@ function validateAction(action) {
     requireFields(action, "operation");
     if (!["clear", "background"].includes(action.operation)) throw new Error("画布操作无效");
     if (action.operation === "clear") {
-      if (action.requiresConfirmation !== true) throw new Error("清空画布必须确认");
       if ("color" in action) throw new Error("清空画布不能设置颜色");
     }
     if (action.operation === "background") {
-      if ("requiresConfirmation" in action) throw new Error("背景操作不能包含确认字段");
       requireFields(action, "color"); validateColor(action.color, false);
     }
     return;

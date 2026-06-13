@@ -38,7 +38,7 @@ test("这些图形只引用选择，不会退化为全部图形", () => {
 
 test("命名对象和画布指令", () => {
   assert.equal(parseCommand("选择矩形1")[0].target, "矩形一");
-  assert.equal(parseCommand("清空画布")[0].requiresConfirmation, true);
+  assert.equal(parseCommand("清空画布")[0].operation, "clear");
   assert.equal(splitCommands("撤销，然后重做").length, 2);
 });
 
@@ -297,7 +297,7 @@ test("fuzzyCorrect 修正背景和画布相关词", () => {
   const canvasActions = parseCommand("青空画部");
   assert.equal(canvasActions.length, 1);
   assert.equal(canvasActions[0].type, "canvas");
-  assert.equal(canvasActions[0].requiresConfirmation, true);
+  assert.equal(canvasActions[0].operation, "clear");
 
   const bgActions = parseCommand("背色设为自色");
   assert.equal(bgActions.length, 1);

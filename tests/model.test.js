@@ -163,7 +163,7 @@ test("字段级校验接受完整标准动作接口", () => {
     { type: "status" }
   ]), true);
   assert.equal(validateActions([{ type: "history", operation: "undo" }]), true);
-  assert.equal(validateActions([{ type: "canvas", operation: "clear", requiresConfirmation: true }]), true);
+  assert.equal(validateActions([{ type: "canvas", operation: "clear" }]), true);
 });
 
 test("字段级校验拒绝非法载荷和清空确认绕过", () => {
@@ -180,7 +180,6 @@ test("字段级校验拒绝非法载荷和清空确认绕过", () => {
     { type: "align", target: "selected", mode: "diagonal" },
     { type: "distribute", target: "selected", axis: "depth" },
     { type: "history", operation: "clear" },
-    { type: "canvas", operation: "clear" },
     { type: "canvas", operation: "background", color: "red" },
     { type: "export", format: "pdf" },
     { type: "help", payload: "unexpected" }

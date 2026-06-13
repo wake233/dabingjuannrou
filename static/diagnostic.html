@@ -17,7 +17,6 @@
   <div>
     <button onclick="runAll()">运行全部诊断</button>
     <button onclick="testMic()">测试麦克风</button>
-    <button onclick="testSpeech()">测试浏览器识别</button>
   </div>
   <div id="log"></div>
 
@@ -53,17 +52,7 @@
         R("mic", "fail", "麦克风权限: " + e.message);
       }
 
-      // 3. Check Web Speech API
-      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (Recognition) {
-        R("webspeech", "pass", "Web Speech API: 可用");
-        L("  SpeechRecognition: " + (window.SpeechRecognition ? "标准" : "webkit"));
-        L("  SpeechRecognitionPhrase: " + (window.SpeechRecognitionPhrase || window.webkitSpeechRecognitionPhrase ? "可用" : "不可用"));
-      } else {
-        R("webspeech", "fail", "Web Speech API: 不可用 (仅 Chrome/Edge 支持)");
-      }
-
-      // 4. Check AudioContext
+      // 3. Check AudioContext
       const AC = window.AudioContext || window.webkitAudioContext;
       if (AC) {
         R("audiocontext", "pass", "AudioContext: 可用");
@@ -71,21 +60,21 @@
         R("audiocontext", "fail", "AudioContext: 不可用");
       }
 
-      // 5. Check MediaRecorder
+      // 4. Check MediaRecorder
       if (window.MediaRecorder) {
         R("mediarecorder", "pass", "MediaRecorder: 可用 (云端模式支持)");
       } else {
         R("mediarecorder", "fail", "MediaRecorder: 不可用 (云端模式不可用)");
       }
 
-      // 6. Check speech synthesis (TTS)
+      // 5. Check speech synthesis (TTS)
       if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
         R("tts", "pass", "TTS 语音播报: 可用");
       } else {
         R("tts", "warn", "TTS 语音播报: 不可用 (不影响识别，仅无语音反馈)");
       }
 
-      // 7. Check API server
+      // 6. Check API server
       try {
         const resp = await fetch("/api/status");
         const status = await resp.json();
@@ -104,7 +93,7 @@
         R("api", "fail", "API 服务不可达: " + e.message + " (请运行 python main.py)");
       }
 
-      // 8. Summary
+      // 7. Summary
       L("");
       L("=== 诊断完成 ===");
     }
@@ -137,31 +126,6 @@
       } catch (e) {
         L("  ✗ 错误: " + e.message);
       }
-    }
-
-    async function testSpeech() {
-      L("--- 测试浏览器语音识别 ---");
-      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!Recognition) {
-        L("  ✗ 浏览器不支持 Web Speech API，请使用 Chrome 或 Edge");
-        return;
-      }
-      const recog = new Recognition();
-      recog.lang = "zh-CN";
-      recog.continuous = false;
-      recog.interimResults = true;
-      recog.onstart = () => L("  ✓ 识别已启动，请说话...");
-      recog.onresult = (e) => {
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          const r = e.results[i];
-          const text = r[0]?.transcript?.trim() || "";
-          L("  " + (r.isFinal ? "最终" : "中间") + "结果: \"" + text + "\" conf=" + r[0]?.confidence);
-        }
-      };
-      recog.onerror = (e) => L("  ✗ 错误: " + e.error + " — " + e.message);
-      recog.onend = () => L("  识别已结束 (3秒后自动停止)");
-      recog.start();
-      setTimeout(() => { try { recog.stop(); } catch(e) {} }, 3000);
     }
   </script>
 </body>
