@@ -12,6 +12,14 @@ const KINDS = {
   直线: "line", 线条: "line", 箭头: "arrow", 文字: "text", 文本: "text"
 };
 const POSITIONS = ["左上角", "右上角", "左下角", "右下角", "中央", "中间", "左边", "右边", "上边", "下边"];
+const ENTITY_ALIASES = {
+  人物: "人物", 女人: "人物", 男人: "人物", 女孩: "人物", 男孩: "人物",
+  猫: "猫", 小猫: "猫", 伞: "伞", 雨伞: "伞", 路灯: "路灯", 屋顶: "屋顶",
+  建筑剪影: "建筑剪影", 建筑: "建筑剪影", 雨: "雨", 云: "云", 太阳: "太阳",
+  月亮: "月亮", 星空: "星空", 树: "树", 山: "山", 花丛: "花丛", 河流: "河流",
+  草地: "草地", 街道: "街道", 水洼: "水洼"
+};
+const ENTITY_ALIASES_SORTED = Object.entries(ENTITY_ALIASES).sort(([a], [b]) => b.length - a.length);
 const CN_DIGITS = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
 
 // ── Homophone / near-homophone fuzzy correction table ──────────
@@ -261,6 +269,8 @@ function targetFrom(text, context) {
   if (group) return `组合${chineseIndex(chineseNumber(group[1]))}`;
   const named = text.match(/(矩形|圆形|椭圆|三角形|星形|直线|箭头|文字)([一二两三四五六七八九十百千\d]+)/);
   if (named) return `${named[1]}${chineseIndex(chineseNumber(named[2]))}`;
+  const entity = ENTITY_ALIASES_SORTED.find(([alias]) => text.includes(alias));
+  if (entity) return entity[1];
   return context.selected ? "selected" : "last";
 }
 
@@ -278,7 +288,7 @@ function parseClause(clause, context) {
   if (/清空画布|清除画布|全部清空/.test(clause)) return [{ type: "canvas", operation: "clear" }];
   if (/背景/.test(clause) && colorFrom(clause)) return [{ type: "canvas", operation: "background", color: colorFrom(clause) }];
   if (/保存|导出|下载/.test(clause)) {
-    return [{ type: "export", format: /svg/i.test(clause) ? "svg" : "png" }];
+    return [{ type: "export", format: /工程|项目/.test(clause) ? "project" : /svg/i.test(clause) ? "svg" : "png" }];
   }
 
   const kindEntry = KINDS_SORTED.find(([name]) => clause.includes(name));
@@ -318,7 +328,8 @@ function parseClause(clause, context) {
   if (/移动|放到|放在|移到/.test(clause) && position) {
     return [{ type: "move", target, position: position.replace("中间", "中央") }];
   }
-  const distance = chineseNumber(clause.match(/([零一二两三四五六七八九十百\d.]+)(?:个像素|像素)?/)?.[1]) || 50;
+  const distanceText = clause.replace(/一点/g, "");
+  const distance = chineseNumber(distanceText.match(/([零一二两三四五六七八九十百\d.]+)(?:个像素|像素)?/)?.[1]) || 50;
   if (/向左|往左/.test(clause)) return [{ type: "move", target, dx: -distance, dy: 0 }];
   if (/向右|往右/.test(clause)) return [{ type: "move", target, dx: distance, dy: 0 }];
   if (/向上|往上/.test(clause)) return [{ type: "move", target, dx: 0, dy: -distance }];
@@ -339,6 +350,10 @@ function parseClause(clause, context) {
   const fill = colorAfter(clause, "填充|颜色");
   const stroke = colorAfter(clause, "描边|边框|轮廓");
   const genericColor = colorFrom(clause);
+  const entityMentioned = ENTITY_ALIASES_SORTED.some(([alias]) => clause.includes(alias));
+  if (genericColor && entityMentioned && /改成|变成|颜色/.test(clause) && !/描边|边框|轮廓/.test(clause)) {
+    return [{ type: "entity_update", target, changes: { params: { color: genericColor } } }];
+  }
   if (fill) changes.fill = fill;
   else if (genericColor && /改成|变成/.test(clause) && !/描边|边框|轮廓/.test(clause)) changes.fill = genericColor;
   if (stroke) changes.stroke = stroke;

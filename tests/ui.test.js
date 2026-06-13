@@ -14,12 +14,20 @@ test("现代画室界面保留核心语音与画布接口", () => {
     "listen-button", "voice-status", "latency", "fallback-panel",
     "canvas-shell", "canvas", "drawing-layer", "preview-layer",
     "transcript", "feedback", "object-count", "selection-count", "object-list"
+    ,"scene-summary", "scene-composition", "entity-list", "ignored-list"
   ]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /class="studio-layout"/);
   assert.match(html, /class="workspace"/);
   assert.match(html, /1000 × 700/);
+});
+
+test("主界面提供绘本场景说明、实体和忽略内容区域", () => {
+  assert.match(html, /创作说明/);
+  assert.match(html, /语义实体/);
+  assert.match(html, /忽略内容/);
+  assert.match(styles, /\.scene-card/);
 });
 
 test("界面包含响应式、键盘焦点与减少动态效果支持", () => {

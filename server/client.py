@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 from server.config import CONFIG
 from server.prompt import SYSTEM_PROMPT
-from server.schema import ALLOWED_AUDIO_TYPES, MAX_AUDIO_BYTES, STT_PROMPT, validate_actions
+from server.schema import ALLOWED_AUDIO_TYPES, MAX_AUDIO_BYTES, STT_PROMPT, validate_actions, validate_interpretation
 
 
 class ServiceError(RuntimeError):
@@ -53,7 +53,27 @@ def parse_json_content(content):
         raise ValueError("模型没有返回有效 JSON") from exc
 
 
+def parse_interpretation_content(content):
+    if not isinstance(content, str):
+        raise ValueError("模型返回内容不是文本")
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.I)
+    try:
+        result = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise ValueError("模型没有返回有效 JSON") from exc
+    if isinstance(result, list):
+        result = {"kind": "actions", "actions": result}
+    return validate_interpretation(result)
+
+
 def parse_with_llm(text, context, timeout=12):
+    result = interpret_with_llm(text, context, timeout)
+    if result["kind"] != "actions":
+        raise ServiceError("旧动作接口不支持场景结果", "invalid_response", False, 502)
+    return result["actions"]
+
+
+def interpret_with_llm(text, context, timeout=12):
     base_url = CONFIG["command_model"]["base_url"].rstrip("/")
     api_key = os.environ.get("OPENAI_API_KEY", "")
     model = CONFIG["command_model"]["model"]
@@ -79,7 +99,7 @@ def parse_with_llm(text, context, timeout=12):
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise service_error("命令模型", exc) from exc
     try:
-        return parse_json_content(result["choices"][0]["message"]["content"])
+        return parse_interpretation_content(result["choices"][0]["message"]["content"])
     except ValueError as exc:
         raise ServiceError(str(exc), "invalid_response", False, 502) from exc
     except (KeyError, IndexError, TypeError) as exc:

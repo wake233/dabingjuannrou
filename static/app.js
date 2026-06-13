@@ -1,5 +1,6 @@
-import { DrawingEngine } from "./model.js";
+import { DrawingEngine, validateActions } from "./model.js";
 import { parseCommand } from "./parser.js";
+import { renderEntity } from "./templates.js";
 
 export const engine = new DrawingEngine();
 const $ = id => document.getElementById(id);
@@ -72,6 +73,11 @@ export function polygonPoints(kind, o) {
 }
 
 export function svgElement(o) {
+  if (o.kind === "entity") {
+    const entity = renderEntity(o);
+    if (engine.state.selection.includes(o.id)) entity.setAttribute("filter", "url(#selection-glow)");
+    return entity;
+  }
   const ns = "http://www.w3.org/2000/svg";
   let el;
   const common = { fill: o.fill, stroke: o.stroke, "stroke-width": o.strokeWidth, opacity: o.opacity };
@@ -106,6 +112,12 @@ function renderObjects(layerElement, objects, selection = []) {
     }
     return el;
   }));
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[character]);
 }
 
 export function clearPreview() {
@@ -153,8 +165,18 @@ export function render() {
   // Use a Set for selection membership test (same O(1) optimization as renderObjects)
   const selectionSet = new Set(engine.state.selection);
   $("object-list").innerHTML = engine.state.objects.length
-    ? engine.state.objects.map(o => `<li>${o.name}${selectionSet.has(o.id) ? " · 已选中" : ""}</li>`).join("")
+    ? engine.state.objects.map(o => `<li>${escapeHtml(o.name)}${o.kind === "entity" ? " · 实体" : ""}${selectionSet.has(o.id) ? " · 已选中" : ""}</li>`).join("")
     : "<li>画布还是空的</li>";
+  if ($("scene-summary")) $("scene-summary").textContent = engine.state.scene.summary || "尚未生成绘本场景";
+  if ($("scene-composition")) $("scene-composition").textContent = engine.state.scene.composition || "暂无构图说明";
+  if ($("entity-list")) {
+    const entities = engine.state.objects.filter(object => object.kind === "entity");
+    $("entity-list").innerHTML = entities.length ? entities.map(entity => `<li>${escapeHtml(entity.name)}</li>`).join("") : "<li>暂无语义实体</li>";
+  }
+  if ($("ignored-list")) {
+    $("ignored-list").innerHTML = engine.state.scene.ignored.length
+      ? engine.state.scene.ignored.map(item => `<li>${escapeHtml(item)}</li>`).join("") : "<li>无忽略内容</li>";
+  }
   lastRenderDuration = performance.now() - started;
 }
 
@@ -193,6 +215,10 @@ function describeState() {
 }
 
 export function download(format) {
+  if (format === "project") {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    return saveBlob(new Blob([JSON.stringify(engine.serializeProject(), null, 2)], { type: "application/json" }), `听画-${stamp}.listen-paint.json`);
+  }
   const source = exportSvgSource();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   if (format === "svg") {
@@ -228,10 +254,15 @@ function saveBlob(blob, name) {
 }
 
 export async function llmFallback(text) {
-  say("正在理解");
-  const response = await fetch("/api/parse", {
+  say("正在构思");
+  const entities = engine.state.objects.filter(object => object.kind === "entity");
+  const response = await fetch("/api/interpret", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, context: { objects: engine.state.objects.map(({ id, name, kind }) => ({ id, name, kind })), selection: engine.state.selection } })
+    body: JSON.stringify({ text, context: {
+      objects: engine.state.objects.map(({ id, name, kind }) => ({ id, name, kind })),
+      entities: entities.map(({ id, name, templateId, params, x, y, width, height }) => ({ id, name, templateId, params, bounds: { x, y, width, height } })),
+      selection: engine.state.selection, scene: engine.state.scene
+    } })
   });
   const body = await response.json();
   if (!response.ok) {
@@ -240,7 +271,31 @@ export async function llmFallback(text) {
     error.retryable = body.retryable === true;
     throw error;
   }
-  return body.actions;
+  return body;
+}
+
+function actionsFromInterpretation(result) {
+  if (!result || typeof result !== "object") throw new Error("模型解释结果无效");
+  if (result.kind === "actions" || result.kind === "scene_revision") {
+    if (Object.keys(result).some(key => !["kind", "actions"].includes(key))) throw new Error("模型解释结果字段无效");
+    validateActions(result.actions);
+    return { actions: result.actions, message: result.kind === "scene_revision" ? "场景已更新" : "" };
+  }
+  if (result.kind !== "scene_plan" || Object.keys(result).some(key => !["kind", "scene", "entities"].includes(key))
+    || !Array.isArray(result.entities) || result.entities.length > 20 || !result.scene) throw new Error("场景规划结果无效");
+  if (!result.entities.length) return { actions: [], message: `暂时无法表达：${result.scene.ignored?.join("、") || "没有受支持实体"}` };
+  const actions = [
+    { type: "scene_update", changes: result.scene },
+    ...[...result.entities].sort((a, b) => (a.layer || 0) - (b.layer || 0))
+      .map(entity => ({ type: "entity_create", ...entity }))
+  ];
+  validateActions(actions);
+  return {
+    actions,
+    message: result.scene.ignored?.length
+      ? `场景已生成，已忽略：${result.scene.ignored.join("、")}`
+      : "场景已生成"
+  };
 }
 
 export async function handleCommand(rawText, confidence = 1, metrics = {}) {
@@ -274,7 +329,12 @@ export async function handleCommand(rawText, confidence = 1, metrics = {}) {
       emitAcceptance("error", { segmentId: metrics.segmentId, errorCode: "low_confidence", retryable: true, message: "没有听清" });
       return say("没有听清，请再说一次");
     }
-    try { actions = await llmFallback(rawText); }
+    try {
+      const interpreted = actionsFromInterpretation(await llmFallback(rawText));
+      if (!interpreted.actions.length) return say(interpreted.message);
+      actions = interpreted.actions;
+      metrics.confirmationMessage = interpreted.message;
+    }
     catch (error) {
       console.log("[handleCommand] 模型回退也失败:", error.message);
       emitAcceptance("error", { segmentId: metrics.segmentId, errorCode: error.errorCode || "command_parse_failed", retryable: error.retryable === true, message: error.message });
@@ -282,7 +342,7 @@ export async function handleCommand(rawText, confidence = 1, metrics = {}) {
     }
   }
   console.log("[handleCommand] 解析成功，%d 个动作:", actions.length, actions.map(a => a.type + (a.kind ? ":" + a.kind : "")));
-  return executeActions(actions, started, "", { ...metrics, transcript: rawText });
+  return executeActions(actions, started, metrics.confirmationMessage || "", { ...metrics, transcript: rawText });
 }
 
 function executeActions(actions, started, confirmationMessage = "", metrics = {}) {
@@ -637,6 +697,8 @@ export function testEnterFullListening() {
 export function saveProjectData() {
   return engine.serializeProject();
 }
+
+export { actionsFromInterpretation };
 
 export function loadProjectData(project) {
   engine.loadProject(project);

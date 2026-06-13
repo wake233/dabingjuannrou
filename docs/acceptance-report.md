@@ -2,97 +2,75 @@
 
 ## 任务目标
 
-执行 `PLAN_V3.md` 中当前环境可自动完成的发布收口计划：审查并固化第二版基线，统一云端错误与只读指标，增加主应用引导式验收台，收敛项目文档，并持续执行实现、验证、修复闭环。Chrome/Edge 真实麦克风与 30 分钟人工验收不在当前自动环境中虚报通过。
+完整实现 `PLAN_NEW.md` 的“语音驱动绘本场景创作 V1”：在保留现有基础图形低延迟链路的前提下，增加受校验的 AI 场景规划、可信本地 SVG 实体模板、语义实体状态与持续修改、版本 2 工程迁移、场景说明界面及完整导出，并完成自动化与 smoke 验收后创建独立 Git commit。
 
 ## 验收标准
 
 | ID | 验收要求 | 验收方法 | 通过条件 | 状态 | 证据 |
 | --- | --- | --- | --- | --- | --- |
-| V3-B1 | 当前第二版与 `server/` 重构作为独立基线固化，不回退现有改动 | 审查 `git diff`；运行 Node、Python、smoke、`git diff --check`；检查 commit 内容 | 现有改动符合第二版范围，四项检查通过，独立 commit 不混入 V3 后续实现 | 通过 | `860e52d`；Node 93/93；Python 25/25；smoke 12/12 |
-| V3-E1 | `/api/parse` 与 `/api/transcribe` 错误保留 `error`，并提供稳定 `errorCode`、`retryable` | Python 单元测试覆盖配置缺失、认证、权限、模型、限流、网络、超时、无效响应、空转写 | 每类错误映射稳定，重试属性正确，旧 `error` 字段保留 | 通过 | `ServiceError` 与 29 项 Python 测试 |
-| V3-E2 | 浏览器统一提示麦克风权限、浏览器能力、API 不可达及云端错误 | Node app 测试与代码检查 | 每类失败显示可理解且一致的状态；云端错误使用服务端分类 | 通过 | `tests/app.test.js` 云端、浏览器能力、麦克风权限测试 |
-| V3-M1 | 浏览器发布只读验收事件，记录提交、转写、命令完成、本地耗时与失败类别，且不保存音频 | Node 测试检查事件顺序和载荷；代码检查 | 事件顺序稳定；载荷不含 Blob、音频或音频内容；普通绘图行为不变 | 通过 | `listen-paint-acceptance` 事件测试；Node 96/96 |
-| V3-A1 | 诊断页保留环境预检并提供验收模式入口 | 页面检查与 smoke | 入口指向主应用 `?acceptance=1`，原预检仍可用 | 通过 | `static/diagnostic.html` 与 UI 测试 |
-| V3-A2 | `?acceptance=1` 加载独立验收面板，普通模式不显示且不改变现有行为 | Node UI/app 测试与 smoke | 仅验收参数显示面板；共用主应用语音与绘图链路 | 通过 | 动态加载检查；Node 100/100；smoke 12/12 |
-| V3-A3 | 验收台展示 20 条云端指令并自动记录转写、执行结果、本地与端到端耗时、错误类别 | Node 测试 | 每项均可从只读事件更新，字段完整且结果可人工修正 | 通过 | `tests/acceptance.test.js` |
-| V3-A4 | 验收数据仅存当前浏览器，可填写环境、导出 JSON/Markdown并清除 | Node 测试检查持久化、导出、清除 | localStorage 往返成功；报告不含音频；清除后数据消失 | 通过 | 持久化、报告与清除测试 |
-| V3-D1 | README、DESIGN、PLAN_V2 与真实验收文档和当前实现一致 | 文档检查与测试数量核对 | 已完成能力不再列为技术债；仅云端人工矩阵；清空确认描述正确；V2 标为历史 | 通过 | README、DESIGN、PLAN_V2、`docs/voice-acceptance.md` |
-| V3-R1 | 每个实施阶段无自动化回归并独立提交 | 每阶段运行 Node、Python、smoke、`git diff --check`；检查 git log/status | 所有自动检查通过；合理阶段各有独立 commit，无无关改动混入 | 通过 | `860e52d`、`4896982`、`7372dea`、`fd32877`；最终工作区审计干净 |
-| V3-H1 | Chrome/Edge 分别完成云端 20 指令、首次授权、TTS 恢复、失败重试、30 分钟使用与导出人工验收 | 真实浏览器、麦克风和人工执行 | 两浏览器各至少 18/20；稳定性、恢复和导出满足门槛 | 阻塞 | 当前自动执行环境无法代替真实人员、麦克风和双浏览器长时交互 |
+| N1 | 服务端 `/api/interpret` 返回并校验 `actions`、`scene_plan`、`scene_revision` 联合结果 | Python 单元测试；代码检查 | 三种结果可用；未知模板、非法参数、原始 SVG、非法计划、超过 20 个实体均拒绝；旧 `/api/parse` 兼容 | 通过 | Python 联合协议、非法结果、endpoint 测试 |
+| N2 | 状态模型支持 `scene` 元数据、`entity` 对象、`entity_create`、`entity_update`、`scene_update` | Node model 测试 | 实体字段和模板参数严格校验；选择、移动、缩放、改色、删除、置顶支持实体 | 通过 | `tests/model.test.js` 语义实体与兼容动作测试 |
+| N3 | 场景生成、修改和失败回滚均为单一原子事务 | Node model/app 测试 | 成功只增加一条撤销记录；一次撤销全部回退；失败不改变状态 | 通过 | model 原子回滚、20 实体、三组场景测试 |
+| N4 | 工程格式升级为版本 2，安全迁移版本 1，并完整恢复实体与场景说明 | Node model/app 测试 | V1 自动补空场景；V2 往返一致；非法工程原子拒绝 | 通过 | 版本迁移、项目导出与往返测试 |
+| N5 | 本地可信模板注册表覆盖计划中的 18 个固定模板和唯一 `storybook` 风格 | Node 模板/app 测试；代码检查 | 仅白名单模板和参数可渲染；实体整体选择；无模型原始 SVG/路径执行 | 通过 | `tests/templates.test.js`；浏览器非法场景测试 |
+| N6 | 浏览器场景生成默认追加，携带现有实体名称、参数和边界，空有效计划不改画布 | Node app 测试 | `/api/interpret` 上下文完整；生成提示“正在构思”；无支持实体时明确反馈且状态不变 | 通过 | app 追加上下文与空规划测试 |
+| N7 | 本地规则支持伞改红、人物左移、删除猫；复杂实体修改交给模型 | Node parser/app 测试 | 三类常见修改本地确定性执行；雨量、姿态、朝向、情绪可通过受校验 revision 执行 | 通过 | parser 本地实体规则；revision 联合协议测试 |
+| N8 | 侧栏展示创作说明、实体列表和忽略内容，并通过语音反馈未知实体 | Node app/UI 测试 | 场景元数据和实体可见；忽略项不生成占位符且反馈明确 | 通过 | app 场景渲染与忽略反馈；UI 测试 |
+| N9 | SVG、PNG、项目导出保留实体渲染结果与可编辑数据 | Node app/model 测试 | SVG/PNG 包含实体渲染；V2 项目包含实体参数和场景元数据 | 通过 | SVG 实体与项目版本 2 导出测试 |
+| N10 | 三组端到端场景验收全部通过 | Node acceptance/smoke 测试 | 雨中人物、月夜屋顶猫、春日山野的生成及后续修改结果符合计划 | 通过 | app 三组绘本场景测试；smoke 场景检查 |
+| N11 | 现有基础绘图、语音、事务、导出和安全边界无回归 | 全量 Node、Python、smoke；`git diff --check` | 所有既有测试与新增测试通过，无原始 SVG/任意属性写入能力 | 通过 | 最终 Node 118/118；Python 32/32；smoke 14/14；diff check 通过 |
+| N12 | 文档与实现一致，最终仅提交本次改动 | 文档检查；git status/diff/log | README/DESIGN/验收报告反映场景能力；独立 commit 不混入无关改动 | 通过 | README、DESIGN、验收报告已收敛；最终提交审计仅含本次文件 |
 
 ## 实施记录
 
-### 第 1 轮：建立 V3 验收标准与审查基线
+### 第 1 轮：建立基线与验收清单
 
-- 完成的改动：完整读取 `implement-verify`、`AGENTS.md`、`PLAN_V3.md`、README、DESIGN 和既有验收材料；建立覆盖正常、边界、失败、回归与人工路径的 V3 验收标准。
+- 完成的改动：完整读取 `implement-verify`、`AGENTS.md`、`PLAN_NEW.md`、README、DESIGN、现有验收报告、核心代码和全部相关测试；建立覆盖正常、边界、失败、回归与提交要求的验收清单。
 - 涉及文件：`docs/acceptance-report.md`
-- 验证结果：Node `93/93`、Python `25/25`、smoke `12/12` 通过；`git diff --check` 无空白错误，仅有工作区 LF/CRLF 提示。当前未提交范围与计划 2.1 描述的第二版实现及 `server/` 重构一致。
-- 未通过项：V3-H1 明确阻塞；V3 后续错误分类、指标、验收台和文档收敛尚待实施。
-- 下一步：仅提交既有第二版基线文件，排除本轮新增的 V3 验收报告，然后实施云端错误分类与指标。
+- 验证结果：基线 Node `102/102`、Python `29/29`、smoke `12/12` 通过；初始工作区干净。
+- 未通过项：N1-N10 尚未实现；N11、N12 仅建立基线。
+- 下一步：实现场景联合协议、状态模型、模板注册表和对应测试。
 
-### 第 2 轮：云端错误分类、浏览器提示与只读指标
+### 第 2 轮：场景协议、实体模型、模板、浏览器流程与聚焦验收
 
-- 完成的改动：新增结构化 `ServiceError`，统一配置缺失、认证、权限、模型不存在、限流、网络、超时、无效响应和空转写分类；API 错误响应保留 `error` 并增加 `errorCode`、`retryable`；浏览器统一云端、API、能力与麦克风权限提示；发布不含音频的只读验收事件。
-- 涉及文件：`server/client.py`、`server/handler.py`、`static/app.js`、`tests/test_server.py`、`tests/app.test.js`
-- 首轮失败：聚焦 Python 测试中，旧测试仍限定无效云端响应为 `ValueError`，与新的结构化 `ServiceError` 不匹配。
-- 修复与重验：更新旧断言并新增命令模型无效响应、结构化序列化、浏览器能力和麦克风权限测试；聚焦测试通过。
-- 阶段验证：Node `96/96`、Python `29/29`、smoke `12/12`、`git diff --check` 通过。
-- 下一步：独立提交本阶段，然后实现 `?acceptance=1` 验收台。
+- 完成的改动：新增三类联合解释协议、18 个可信绘本模板、语义实体与场景元数据、版本 2 工程迁移、本地实体修改规则、场景说明侧栏、追加规划上下文、SVG/PNG/项目导出和三组端到端测试。
+- 涉及文件：`server/`、`static/`、`tests/`、README、DESIGN。
+- 首轮失败与修复：旧版本测试仍把版本 2 当非法，按新迁移要求更新；“一点”被数字解析为 1，改为默认小幅移动 50；测试 DOM 未挂载绘制层导致 SVG 导出证据缺失，修复测试环境；固定模板数从误加的 20 个收紧为计划指定的 18 个。
+- 验证结果：聚焦 Node `78/78`、Python `32/32`、smoke `14/14` 通过。首轮全量 Node 仅已有 100 图形 `<16ms` 性能断言在并行负载下抖动失败，其余 `116/117` 通过。
+- 未通过项：N11 待独立全量重验；N12 待最终文档、diff 与提交审计。
+- 下一步：独立运行全量测试，完成最终报告和独立提交。
 
-### 第 3 轮：引导式真实语音验收台
+### 第 3 轮：最终修复、浏览器检查与全量验收
 
-- 完成的改动：诊断页增加验收入口；主应用仅在 `?acceptance=1` 动态加载独立面板；面板展示 20 条云端指令，消费主链路只读事件，支持自动记录、人工覆盖、环境信息、本地持久化、JSON/Markdown 导出和清除。
-- 涉及文件：`static/acceptance.js`、`static/app.js`、`static/diagnostic.html`、`static/styles.css`、`tests/acceptance.test.js`、`tests/ui.test.js`
-- 安全与边界：验收记录不含音频；动态文本进行 HTML 转义；普通模式不静态创建验收面板，也不写验收存储。
-- 验证结果：聚焦验收台/UI/app 测试 `46/46` 通过；全量 Node `100/100`、Python `29/29`、smoke `12/12`、`git diff --check` 通过。
-- 未通过项：V3-H1 仍需 Chrome/Edge 真实麦克风人工执行。
-- 下一步：独立提交本阶段，随后收敛 README、DESIGN、PLAN_V2 和真实验收文档。
-
-### 第 4 轮：文档事实收敛
-
-- 完成的改动：README 修正清空画布与错误协议并加入验收入口；DESIGN 更新 `server/` 与验收模块职责、实际测试数量、已完成能力、技术债和下一阶段优先级；真实验收矩阵收敛为仅云端；PLAN_V2 标为历史计划。
-- 涉及文件：`README.md`、`DESIGN.md`、`PLAN_V2.md`、`docs/voice-acceptance.md`
-- 文档判断：PLAN_V2 内部旧浏览器/唤醒路线保留作为历史记录，但顶部明确声明当前依据为 PLAN_V3；当前使用文档和真实验收矩阵不再要求已移除能力。
-- 验证结果：Node `100/100`、Python `29/29`、smoke `12/12`、`git diff --check` 通过。
-- 未通过项：V3-H1 仍为真实环境阻塞；不得宣布完整发布通过。
-- 下一步：独立提交本阶段，执行最终工作区与提交审计并完成报告。
-
-### 第 5 轮：最终提交与工作区审计
-
-- 完成的检查：在四个阶段提交完成后重新运行所有必需命令；核对提交统计、工作区状态与阶段边界。
-- 提交证据：`860e52d` 固化第二版基线；`4896982` 云端错误与指标；`7372dea` 引导式验收台；`fd32877` 文档事实收敛。
-- 验证结果：最终 Node `100/100`、Python `29/29`、smoke `12/12`、`git diff --check` 通过；审计时工作区无未提交改动。
-- 验收结论：所有当前环境可自动完成的 V3 标准均通过；V3-H1 因缺少真实人员、真实麦克风和 Chrome/Edge 30 分钟交互保持阻塞。
+- 完成的改动：将模板白名单严格收敛为计划指定的 18 个模板；增加受控 `layer` 层次排序；让实体方向参数影响可信模板渲染；补充浏览器端联合结果严格字段校验、HTML 转义和文档事实。
+- 失败与修复：首轮全量 Node 的 100 图形性能断言在并行负载下抖动为 33.27ms；未改测试门槛，独立全量重验恢复通过。`python -m py_compile main.py server/*.py` 因 Windows 不展开通配符失败，改用 `python -m compileall -q main.py server` 完成等价语法检查。
+- 浏览器检查：本地主页面可正常加载，新增“创作说明/语义实体/忽略内容”侧栏布局完整，浏览器控制台无 error/warning。
+- 最终验证：Node `118/118`、Python `32/32`、smoke `14/14`、Python compileall、`git diff --check` 全部通过。
+- 未通过项：无。
+- 下一步：仅提交本次计划相关文件并记录最终 commit。
 
 ## 测试结果
 
 | 命令或检查方法 | 结果 | 关键输出 |
 | --- | --- | --- |
-| 初始 `git diff --check` | 通过 | 无空白错误；仅 LF/CRLF 工作区提示 |
-| 基线 `node --test tests/*.test.js` | 通过 | 93/93 |
-| 基线 `python -m unittest discover -s tests -p "test_*.py" -v` | 通过 | 25/25 |
+| 基线 `node --test tests/*.test.js` | 通过 | 102/102 |
+| 基线 `python -m unittest discover -s tests -p "test_*.py" -v` | 通过 | 29/29 |
 | 基线 `node tests/smoke_test.mjs` | 通过 | 12/12 |
-| 错误与指标阶段 `node --test tests/*.test.js` | 通过 | 96/96 |
-| 错误与指标阶段 Python unittest | 通过 | 29/29 |
-| 错误与指标阶段 `node tests/smoke_test.mjs` | 通过 | 12/12 |
-| 错误与指标阶段 `git diff --check` | 通过 | 无空白错误；仅 LF/CRLF 工作区提示 |
-| 验收台阶段 `node --test tests/*.test.js` | 通过 | 100/100 |
-| 验收台阶段 Python unittest | 通过 | 29/29 |
-| 验收台阶段 `node tests/smoke_test.mjs` | 通过 | 12/12 |
-| 验收台阶段 `git diff --check` | 通过 | 无空白错误；仅 LF/CRLF 工作区提示 |
-| 文档阶段 `node --test tests/*.test.js` | 通过 | 100/100 |
-| 文档阶段 Python unittest | 通过 | 29/29 |
-| 文档阶段 `node tests/smoke_test.mjs` | 通过 | 12/12 |
-| 文档阶段 `git diff --check` | 通过 | 无空白错误；仅 LF/CRLF 工作区提示 |
-| 最终 `node --test tests/*.test.js` | 通过 | 100/100 |
-| 最终 `python -m unittest discover -s tests -p "test_*.py" -v` | 通过 | 29/29 |
-| 最终 `node tests/smoke_test.mjs` | 通过 | 12/12 |
-| 最终 `git diff --check` 与工作区审计 | 通过 | 无空白错误；审计时工作区干净 |
+| 聚焦 Node 场景与回归测试 | 通过 | 78/78 |
+| 场景实现后 Python unittest | 通过 | 32/32 |
+| 场景实现后 smoke | 通过 | 14/14 |
+| 首轮全量 Node | 未通过 | 116/117；100 图形性能断言在并行负载下为 33.27ms |
+| 最终 `node --test tests/*.test.js` | 通过 | 118/118 |
+| 最终 `python -m unittest discover -s tests -p "test_*.py" -v` | 通过 | 32/32 |
+| 最终 `node tests/smoke_test.mjs` | 通过 | 14/14 |
+| `python -m compileall -q main.py server` | 通过 | Python 文件语法检查通过 |
+| 本地浏览器主页面检查 | 通过 | 场景侧栏布局完整；控制台无 error/warning |
+| 最终 `git diff --check` | 通过 | 无空白错误；仅工作区 LF/CRLF 提示 |
 
 ## 最终结论
 
-PLAN_V3 中所有当前环境可自动完成的实现、测试、文档和提交要求均已完成，自动化验收通过。由于 Chrome/Edge 真实麦克风、双浏览器 20 条指令和 30 分钟连续使用尚未人工执行，候选版最终状态仍为“人工验收阻塞”，不得宣布完整发布通过。
+`PLAN_NEW.md` 的场景联合协议、语义实体模型、可信模板、持续修改、版本迁移、界面、导出、自动测试和 smoke 验收均已完成。所有验收标准通过。
 
 ## 残余风险
 
-- Chrome/Edge 真实麦克风授权、各自至少 `18/20` 正确执行、端到端延迟、TTS 暂停恢复、失败重试、SVG/PNG 查看和 30 分钟稳定性必须由人工真实环境验收。
+- 真实外部模型对开放式绘本描述的规划质量仍依赖模型能力；本次自动化和浏览器检查覆盖了协议、安全边界、可信渲染和代表性端到端结果，但未替代真实麦克风与外部模型的人工质量评估。

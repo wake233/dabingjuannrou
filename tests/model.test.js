@@ -342,7 +342,7 @@ test("工程格式往返恢复完整状态并原子拒绝恶意载荷", () => {
 
   const before = JSON.stringify(restored.serializeProject());
   for (const invalid of [
-    { ...project, version: 2 },
+    { ...project, version: 3 },
     { ...project, state: { ...project.state, objects: [{ ...project.state.objects[0], onclick: "alert(1)" }] } },
     { ...project, state: { ...project.state, selection: ["missing-id"] } },
     { ...project, state: { ...project.state, counters: { rect: -1 } } },
@@ -437,4 +437,97 @@ test("共享动作验证向量在浏览器侧按预期接受或拒绝", () => {
   const vectors = JSON.parse(fs.readFileSync(new URL("./action_vectors.json", import.meta.url), "utf8"));
   for (const actions of vectors.valid) assert.doesNotThrow(() => validateActions(actions));
   for (const actions of vectors.invalid) assert.throws(() => validateActions(actions));
+});
+
+test("语义实体创建、按中文名修改移动删除并一次撤销场景事务", () => {
+  const engine = new DrawingEngine();
+  engine.execute([
+    { type: "scene_update", changes: { theme: "雨夜", mood: "安静", composition: "人物在左，路灯在右", summary: "雨中人物", ignored: ["龙"] } },
+    { type: "entity_create", templateId: "person", name: "人物", role: "主角", x: 300, y: 260, width: 100, height: 240, params: { color: "#596780", direction: "right" } },
+    { type: "entity_create", templateId: "umbrella", name: "伞", role: "道具", x: 260, y: 180, width: 180, height: 160, params: { color: "#88a9bd" } },
+    { type: "entity_create", templateId: "rain", name: "雨", role: "天气", x: 0, y: 0, width: 1000, height: 700, params: { density: .5 } }
+  ]);
+  assert.equal(engine.undoStack.length, 1);
+  assert.equal(engine.state.scene.summary, "雨中人物");
+  engine.execute([
+    { type: "entity_update", target: "伞", changes: { params: { color: "#ef4444" } } },
+    { type: "move", target: "人物", dx: -50, dy: 0 },
+    { type: "entity_update", target: "雨", changes: { params: { density: .9 } } }
+  ]);
+  assert.equal(engine.state.objects.find(object => object.name === "伞").params.color, "#ef4444");
+  assert.equal(engine.state.objects.find(object => object.name === "人物").x, 250);
+  assert.equal(engine.state.objects.find(object => object.name === "雨").params.density, .9);
+  engine.undo();
+  assert.equal(engine.state.objects.find(object => object.name === "伞").params.color, "#88a9bd");
+  engine.undo();
+  assert.equal(engine.state.objects.length, 0);
+});
+
+test("语义实体非法模板参数和失败场景事务原子回滚", () => {
+  assert.throws(() => validateActions([{ type: "entity_create", templateId: "dragon", name: "龙", x: 0, y: 0, width: 100, height: 100 }]));
+  assert.throws(() => validateActions([{ type: "entity_create", templateId: "cat", name: "猫", x: 0, y: 0, width: 100, height: 100, params: { svg: "<path/>" } }]));
+  assert.throws(() => validateActions([{ type: "entity_update", target: "猫", changes: { params: { href: "https://evil.test" } } }]));
+  const engine = new DrawingEngine();
+  const before = JSON.stringify(engine.state);
+  assert.throws(() => engine.execute([
+    { type: "entity_create", templateId: "cat", name: "猫", x: 100, y: 100, width: 120, height: 100 },
+    { type: "entity_update", target: "不存在", changes: { params: { direction: "left" } } }
+  ]));
+  assert.equal(JSON.stringify(engine.state), before);
+});
+
+test("版本 1 工程迁移为空场景且版本 2 完整恢复实体参数", () => {
+  const oldEngine = new DrawingEngine();
+  oldEngine.execute([{ type: "create", kind: "circle" }]);
+  const version1 = oldEngine.serializeProject();
+  version1.version = 1;
+  delete version1.state.scene;
+  version1.history.undo.forEach(state => delete state.scene);
+  version1.history.redo.forEach(state => delete state.scene);
+  const migrated = new DrawingEngine();
+  migrated.loadProject(version1);
+  assert.equal(migrated.state.scene.style, "storybook");
+  assert.equal(migrated.state.scene.summary, "");
+
+  migrated.execute([
+    { type: "scene_update", changes: { summary: "月夜屋顶猫" } },
+    { type: "entity_create", templateId: "cat", name: "猫", x: 500, y: 300, width: 150, height: 120, params: { direction: "left", color: "#596780" } }
+  ]);
+  const version2 = migrated.serializeProject();
+  assert.equal(version2.version, 2);
+  const restored = new DrawingEngine();
+  restored.loadProject(version2);
+  assert.deepEqual(restored.serializeProject(), version2);
+});
+
+test("现有选择、缩放、旋转、置顶和删除动作支持语义实体", () => {
+  const engine = new DrawingEngine();
+  engine.execute([
+    { type: "entity_create", templateId: "moon", name: "月亮", x: 50, y: 50, width: 100, height: 100 },
+    { type: "entity_create", templateId: "cloud", name: "云", x: 200, y: 80, width: 180, height: 90 }
+  ]);
+  engine.execute([{ type: "select", target: "月亮" }, {
+    type: "update", target: "selected", changes: { width: { multiply: 2 }, height: { multiply: 2 }, rotation: 15, zOrder: "top" }
+  }]);
+  assert.equal(engine.state.objects.at(-1).name, "月亮");
+  assert.equal(engine.state.objects.at(-1).width, 200);
+  assert.equal(engine.state.objects.at(-1).rotation, 15);
+  engine.execute([{ type: "delete", target: "云" }]);
+  assert.deepEqual(engine.state.objects.map(object => object.name), ["月亮"]);
+});
+
+test("单个场景规划允许最多 20 个实体但拒绝普通 21 动作", () => {
+  const sceneActions = [
+    { type: "scene_update", changes: { summary: "星空" } },
+    ...Array.from({ length: 20 }, (_, index) => ({
+      type: "entity_create", templateId: "stars", name: `星空${index + 1}`,
+      x: index * 10, y: 0, width: 100, height: 100
+    }))
+  ];
+  assert.doesNotThrow(() => validateActions(sceneActions));
+  const engine = new DrawingEngine();
+  engine.execute(sceneActions);
+  assert.equal(engine.state.objects.length, 20);
+  assert.equal(engine.undoStack.length, 1);
+  assert.throws(() => validateActions(Array.from({ length: 21 }, () => ({ type: "help" }))));
 });

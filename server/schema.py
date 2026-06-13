@@ -5,6 +5,19 @@ import re
 ALLOWED_ACTIONS = {
     "create", "select", "update", "move", "align", "distribute", "duplicate",
     "delete", "group", "ungroup", "history", "canvas", "export", "help", "status",
+    "entity_create", "entity_update", "scene_update",
+}
+ENTITY_TEMPLATES = {
+    "person": {"color", "accent", "pose", "direction"},
+    "cat": {"color", "accent", "pose", "direction"},
+    "umbrella": {"color", "accent", "direction"},
+    "streetlamp": {"color", "accent"}, "roof": {"color", "accent"},
+    "buildings": {"color", "accent", "density"}, "rain": {"color", "density", "direction"},
+    "cloud": {"color", "density"}, "sun": {"color", "accent"}, "moon": {"color", "accent"},
+    "stars": {"color", "density", "count"}, "tree": {"color", "accent", "density"},
+    "mountain": {"color", "accent", "density"}, "flowers": {"color", "accent", "density", "count"},
+    "river": {"color", "accent", "direction"}, "grass": {"color", "accent", "density"},
+    "street": {"color", "accent", "direction"}, "puddle": {"color", "accent"},
 }
 KINDS = {"rect", "circle", "ellipse", "triangle", "star", "line", "arrow", "text"}
 POSITIONS = {"左边", "右边", "上边", "下边", "左上角", "右上角", "左下角", "右下角", "中央"}
@@ -27,6 +40,9 @@ ACTION_FIELDS = {
     "export": {"type", "format"},
     "help": {"type"},
     "status": {"type"},
+    "entity_create": {"type", "templateId", "name", "role", "x", "y", "width", "height", "rotation", "opacity", "layer", "params"},
+    "entity_update": {"type", "target", "changes"},
+    "scene_update": {"type", "changes"},
 }
 COLOR_PATTERN = re.compile(r"^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$", re.I)
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
@@ -126,12 +142,102 @@ def validate_change_value(field, value):
         raise ValueError("层级操作无效")
 
 
+def validate_string(value, allow_empty=False, maximum=1000):
+    if not isinstance(value, str) or (not allow_empty and not value) or len(value) > maximum:
+        raise ValueError("文本字段无效")
+
+
+def validate_entity_params(template_id, params):
+    if template_id not in ENTITY_TEMPLATES or not isinstance(params, dict):
+        raise ValueError("实体模板或参数无效")
+    for field, value in params.items():
+        if field not in ENTITY_TEMPLATES[template_id]:
+            raise ValueError(f"模板不支持参数 {field}")
+        if field in {"color", "accent"}:
+            validate_color(value, False)
+        elif field == "pose" and not allowed_value(value, {"standing", "walking", "sitting", "curled"}):
+            raise ValueError("实体姿态参数无效")
+        elif field == "direction" and not allowed_value(value, {"left", "right", "vertical", "diagonal"}):
+            raise ValueError("实体方向参数无效")
+        elif field == "count" and (not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 100):
+            raise ValueError("实体数量参数无效")
+        elif field == "density" and not finite_number(value, 0, 1):
+            raise ValueError("实体密度参数无效")
+
+
+def validate_scene_changes(changes):
+    if not isinstance(changes, dict) or not changes:
+        raise ValueError("场景修改内容无效")
+    allowed = {"theme", "mood", "composition", "summary", "ignored"}
+    if set(changes) - allowed:
+        raise ValueError("场景修改字段无效")
+    for field, value in changes.items():
+        if field == "ignored":
+            if not isinstance(value, list) or len(value) > 20 or any(not isinstance(item, str) or not item or len(item) > 100 for item in value):
+                raise ValueError("场景忽略项无效")
+        else:
+            validate_string(value, True)
+
+
+def validate_entity_changes(changes):
+    if not isinstance(changes, dict) or not changes:
+        raise ValueError("实体修改内容无效")
+    allowed = {"name", "role", "width", "height", "rotation", "opacity", "params", "zOrder"}
+    if set(changes) - allowed:
+        raise ValueError("实体修改字段无效")
+    for field, value in changes.items():
+        if field in {"name", "role"}:
+            validate_string(value, field == "role", 100)
+        elif field in {"width", "height", "rotation", "opacity", "zOrder"}:
+            validate_change_value(field, value)
+        elif not isinstance(value, dict):
+            raise ValueError("实体参数修改无效")
+        else:
+            allowed_params = set().union(*ENTITY_TEMPLATES.values())
+            if set(value) - allowed_params:
+                raise ValueError("实体参数修改无效")
+            for param, param_value in value.items():
+                if param in {"color", "accent"}:
+                    validate_color(param_value, False)
+                elif param == "pose" and not allowed_value(param_value, {"standing", "walking", "sitting", "curled"}):
+                    raise ValueError("实体姿态参数无效")
+                elif param == "direction" and not allowed_value(param_value, {"left", "right", "vertical", "diagonal"}):
+                    raise ValueError("实体方向参数无效")
+                elif param == "count" and (not isinstance(param_value, int) or isinstance(param_value, bool) or not 1 <= param_value <= 100):
+                    raise ValueError("实体数量参数无效")
+                elif param == "density" and not finite_number(param_value, 0, 1):
+                    raise ValueError("实体密度参数无效")
+
+
 def validate_action(action):
     action_type = action["type"]
     unknown = set(action) - ACTION_FIELDS[action_type]
     if unknown:
         raise ValueError(f"{action_type} 包含不允许的字段 {next(iter(unknown))}")
-    if action_type == "create":
+    if action_type == "entity_create":
+        require_fields(action, "templateId", "name", "x", "y", "width", "height")
+        validate_string(action["name"], False, 100)
+        if "role" in action:
+            validate_string(action["role"], True, 100)
+        if not finite_number(action["x"]) or not finite_number(action["y"]):
+            raise ValueError("实体坐标无效")
+        validate_dimension(action["width"])
+        validate_dimension(action["height"])
+        if "rotation" in action and not finite_number(action["rotation"]):
+            raise ValueError("实体旋转无效")
+        if "opacity" in action and not finite_number(action["opacity"], 0, 1):
+            raise ValueError("实体透明度无效")
+        if "layer" in action and (not isinstance(action["layer"], int) or isinstance(action["layer"], bool) or not -1000 <= action["layer"] <= 1000):
+            raise ValueError("实体层次无效")
+        validate_entity_params(action["templateId"], action.get("params", {}))
+    elif action_type == "entity_update":
+        require_fields(action, "target", "changes")
+        validate_target(action["target"])
+        validate_entity_changes(action["changes"])
+    elif action_type == "scene_update":
+        require_fields(action, "changes")
+        validate_scene_changes(action["changes"])
+    elif action_type == "create":
         require_fields(action, "kind")
         if not allowed_value(action["kind"], KINDS):
             raise ValueError("图形类型无效")
@@ -199,7 +305,7 @@ def validate_action(action):
             validate_color(action["color"], False)
     elif action_type == "export":
         require_fields(action, "format")
-        if not allowed_value(action["format"], {"svg", "png"}):
+        if not allowed_value(action["format"], {"svg", "png", "project"}):
             raise ValueError("导出格式无效")
 
 
@@ -215,7 +321,12 @@ def validate_optional_style(action):
 
 
 def validate_actions(actions):
-    if not isinstance(actions, list) or not 1 <= len(actions) <= 20:
+    scene_batch = (
+        isinstance(actions, list) and len(actions) <= 21
+        and sum(isinstance(action, dict) and action.get("type") == "scene_update" for action in actions) == 1
+        and sum(isinstance(action, dict) and action.get("type") == "entity_create" for action in actions) == len(actions) - 1
+    )
+    if not isinstance(actions, list) or not actions or (len(actions) > 20 and not scene_batch):
         raise ValueError("模型动作数量必须在 1 到 20 之间")
     for action in actions:
         if not isinstance(action, dict) or not allowed_value(action.get("type"), ALLOWED_ACTIONS):
@@ -224,3 +335,36 @@ def validate_actions(actions):
     if any(action["type"] == "history" for action in actions) and len(actions) != 1:
         raise ValueError("撤销或重做必须单独执行")
     return actions
+
+
+def validate_interpretation(result):
+    if not isinstance(result, dict) or set(result) - {"kind", "actions", "scene", "entities"}:
+        raise ValueError("解释结果结构无效")
+    kind = result.get("kind")
+    if kind == "actions":
+        if set(result) != {"kind", "actions"}:
+            raise ValueError("动作解释结果结构无效")
+        validate_actions(result["actions"])
+    elif kind == "scene_revision":
+        if set(result) != {"kind", "actions"}:
+            raise ValueError("场景修改结果结构无效")
+        actions = validate_actions(result["actions"])
+        if any(action["type"] not in {"entity_create", "entity_update", "scene_update", "move", "delete", "update"} for action in actions):
+            raise ValueError("场景修改包含不允许的动作")
+    elif kind == "scene_plan":
+        if set(result) != {"kind", "scene", "entities"} or not isinstance(result["entities"], list) or len(result["entities"]) > 20:
+            raise ValueError("场景规划结构无效")
+        scene = result["scene"]
+        if not isinstance(scene, dict) or set(scene) != {"theme", "mood", "composition", "summary", "ignored"}:
+            raise ValueError("场景说明结构无效")
+        validate_scene_changes(scene)
+        names = set()
+        for entity in result["entities"]:
+            action = {"type": "entity_create", **entity}
+            validate_action(action)
+            if entity["name"] in names:
+                raise ValueError("实体名称重复")
+            names.add(entity["name"])
+    else:
+        raise ValueError("解释结果类型无效")
+    return result

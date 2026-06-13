@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from server.config import STATIC
 from server.schema import MAX_AUDIO_BYTES
-from server.client import ServiceError, transcribe_audio, parse_with_llm
+from server.client import ServiceError, transcribe_audio, parse_with_llm, interpret_with_llm
 
 
 class AppHandler(SimpleHTTPRequestHandler):
@@ -26,7 +26,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlsplit(self.path).path
-        if path not in {"/api/parse", "/api/transcribe"}:
+        if path not in {"/api/parse", "/api/interpret", "/api/transcribe"}:
             self.send_error(404)
             return
         try:
@@ -53,8 +53,11 @@ class AppHandler(SimpleHTTPRequestHandler):
             context = body.get("context", {})
             if not isinstance(context, dict):
                 raise ValueError("上下文无效")
-            actions = parse_with_llm(text, context)
-            self.send_json(200, {"actions": actions})
+            if path == "/api/interpret":
+                self.send_json(200, interpret_with_llm(text, context))
+            else:
+                actions = parse_with_llm(text, context)
+                self.send_json(200, {"actions": actions})
         except ServiceError as exc:
             self.send_json(exc.status, {
                 "error": str(exc),

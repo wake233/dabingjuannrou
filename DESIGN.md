@@ -13,6 +13,7 @@
 2. 文本优先由本地确定性规则解析，未知表达可回退至 OpenAI 兼容命令模型。
 3. 动作在浏览器状态副本中按事务执行，成功后统一提交并渲染 SVG。
 4. 结果通过画面、状态文字和中文语音播报反馈。
+5. 开放式绘本描述可由 `/api/interpret` 规划为受约束语义实体，再由本地可信模板渲染并继续修改。
 
 当前版本已经具备完整的结构化绘图、云端语音和自动测试覆盖。浏览器 Web Speech 识别与唤醒词已移除；真实 Vosk 离线识别尚未闭环，现有模块仅作为隔离实验脚手架保留。
 
@@ -39,7 +40,7 @@
                          v
 语音文本 ── 本地 parser.js ── 标准动作 ── model.js 事务执行 ── SVG 渲染
                │
-               └─ 解析失败时 POST /api/parse ── OpenAI 兼容命令模型
+               └─ 解析失败时 POST /api/interpret ── OpenAI 兼容命令模型
 ```
 
 ### 2.2 模块职责
@@ -48,6 +49,7 @@
 | --- | --- | --- |
 | `static/model.js` | 状态模型、动作校验、目标解析、事务执行、历史记录、自动命名 | 纯 JavaScript，不依赖 DOM |
 | `static/parser.js` | 中文数字、模糊纠错、文本归一化、分句、本地规则、复合图形拆解 | 输出标准动作，并调用浏览器侧动作校验 |
+| `static/scene_schema.js` / `templates.js` | 语义实体白名单、受控参数与 `storybook` SVG 模板 | 模型不能提供原始 SVG；实体整体选择 |
 | `static/app.js` | 云端语音状态机、VAD、预览与正式渲染、TTS、导出、模型回退、只读验收事件 | 浏览器编排层，依赖 DOM 和浏览器媒体 API |
 | `static/acceptance.js` | `?acceptance=1` 引导式验收台、浏览器本地记录与报告导出 | 仅在验收模式动态加载，不保存音频 |
 | `static/vosk_recognizer.js` | IndexedDB 模型缓存接口、离线识别器生命周期和 mock 注入 | 真实 Vosk WASM 初始化仍是桩代码 |
@@ -68,6 +70,7 @@ lastCreated   最近一次创建或复制的对象 ID
 nextId        下一个对象 ID
 groups        groupId 到成员 ID 数组的映射
 nextGroupId   下一个组合 ID
+scene         主题、情绪、构图说明、摘要与忽略项
 ```
 
 每次修改动作都先作用于深拷贝状态。任意动作失败时不提交；全部成功后只生成一条撤销历史。撤销栈最多保留 50 条，执行新事务后清空重做栈。
@@ -106,7 +109,7 @@ nextGroupId   下一个组合 ID
                            ├─ 成功：动作校验
                            └─ 失败：
                                 ├─ 置信度低于 0.45：提示重说
-                                └─ 其他情况：调用 /api/parse
+                                └─ 其他情况：调用 /api/interpret
                                      └─ 动作校验
                                           └─ 事务执行、渲染、播报
 ```
@@ -131,6 +134,8 @@ nextGroupId   下一个组合 ID
 | `canvas` | `operation` | 清空或修改背景色 |
 | `export` | `format` | 导出 SVG 或 PNG |
 | `help` / `status` | 无 | 触发语音效果 |
+| `entity_create` / `entity_update` | 模板、名称、边界、层次、受控参数 | 创建或修改整体语义实体 |
+| `scene_update` | 主题、情绪、构图、摘要、忽略项 | 更新场景语义元数据 |
 
 ### 3.2 图形、目标与属性
 
@@ -164,6 +169,8 @@ nextGroupId   下一个组合 ID
 | 背景色、帮助和状态 | 完成 | 状态播报当前对象名称 |
 | SVG 与 PNG 导出 | 完成 | PNG 显式绘制背景；非白色 SVG 背景写入背景矩形 |
 | 项目保存与恢复 | 完成 | 带版本 JSON 工程格式、安全加载、完整历史和本地自动恢复 |
+| 绘本场景规划与语义实体 | 完成 | 18 个固定模板；场景生成和修改均为单一原子事务 |
+| 版本 2 工程迁移 | 完成 | 版本 1 自动补空场景；版本 2 保留实体参数与场景说明 |
 
 ### 4.2 本地中文解析
 
@@ -197,7 +204,8 @@ nextGroupId   下一个组合 ID
 | 接口 | 输入 | 输出 | 限制 |
 | --- | --- | --- | --- |
 | `/api/transcribe` | 原始音频请求体 | `{ "text": "..." }` 或结构化错误 | 最大 10MB；限制 WebM、Ogg、MP4、MP3、WAV |
-| `/api/parse` | `{ text, context }` | `{ "actions": [...] }` 或结构化错误 | 文本最大 1000 字符；动作最多 20 个 |
+| `/api/parse` | `{ text, context }` | `{ "actions": [...] }` 或结构化错误 | 旧标准动作兼容接口 |
+| `/api/interpret` | `{ text, context }` | `actions`、`scene_plan` 或 `scene_revision` | 最多 20 个实体；拒绝未知模板、原始 SVG 和非法参数 |
 
 错误响应保留可读的 `error` 文本，并增加稳定的 `errorCode` 与布尔值 `retryable`。分类覆盖配置缺失、认证、权限、模型不存在、限流、网络、超时、无效响应和空转写。
 
@@ -223,10 +231,10 @@ nextGroupId   下一个组合 ID
 
 ```text
 node --test tests/*.test.js
-100 项通过，0 项失败
+118 项通过，0 项失败
 
 python -m unittest discover -s tests -p "test_*.py" -v
-29 项通过，0 项失败
+32 项通过，0 项失败
 ```
 
 | 测试文件 | 数量 | 主要覆盖 |

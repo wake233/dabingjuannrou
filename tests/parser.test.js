@@ -394,3 +394,14 @@ test("一排一列在画布内等间距且超上限明确拒绝", () => {
   }
   assert.throws(() => parseCommand("画一排二十一 个圆".replace(" ", "")), /不能超过 20/);
 });
+
+test("常见语义实体修改由本地规则确定性解析", () => {
+  assert.deepEqual(parseCommand("把伞改成红色"), [{
+    type: "entity_update", target: "伞", changes: { params: { color: "#ef4444" } }
+  }]);
+  assert.deepEqual(parseCommand("女人往左一点"), [{
+    type: "move", target: "人物", dx: -50, dy: 0
+  }]);
+  assert.deepEqual(parseCommand("删除那只猫"), [{ type: "delete", target: "猫" }]);
+  assert.equal(parseCommand("保存项目")[0].format, "project");
+});

@@ -30,6 +30,7 @@ class FakeElement {
   getAttribute(name) { return this.attributes[name] ?? null; }
   removeAttribute(name) { delete this.attributes[name]; }
   replaceChildren(...children) { this.children = children; }
+  appendChild(child) { this.children.push(child); return child; }
   cloneNode(deep = false) {
     const clone = new FakeElement(this.tagName, this.id);
     clone.attributes = { ...this.attributes };
@@ -61,9 +62,10 @@ function installBrowser() {
     "drawing-layer", "preview-layer", "canvas", "canvas-shell", "object-count", "selection-count", "object-list",
     "feedback", "toast", "transcript", "latency", "voice-status", "listen-button",
     "wave", "listen-label", "fallback-panel", "retry-cloud", "fallback-stop",
-    "mode-indicator"
+    "mode-indicator", "scene-summary", "scene-composition", "entity-list", "ignored-list"
   ];
   const elements = Object.fromEntries(ids.map(id => [id, new FakeElement(id === "canvas" ? "svg" : "div", id)]));
+  elements.canvas.replaceChildren(elements["preview-layer"], elements["drawing-layer"]);
   elements["fallback-panel"].hidden = true;
   const downloads = [];
   const canvasCalls = [];
@@ -211,7 +213,7 @@ test("低置信度的未知指令不会回退模型或执行动作", async () =>
   let requested = false;
   globalThis.fetch = async () => {
     requested = true;
-    return { ok: true, json: async () => ({ actions: [{ type: "create", kind: "star" }] }) };
+    return { ok: true, json: async () => ({ kind: "actions", actions: [{ type: "create", kind: "star" }] }) };
   };
 
   await app.handleCommand("无法理解的含糊表达", .44);
@@ -633,15 +635,162 @@ test("未知本地指令回退模型并携带画布上下文", async () => {
   let request;
   globalThis.fetch = async (url, options) => {
     request = { url, options };
-    return { ok: true, json: async () => ({ actions: [{ type: "create", kind: "star" }] }) };
+    return { ok: true, json: async () => ({ kind: "actions", actions: [{ type: "create", kind: "star" }] }) };
   };
 
   await app.handleCommand("来点模型才能理解的表达");
-  assert.equal(request.url, "/api/parse");
+  assert.equal(request.url, "/api/interpret");
   const body = JSON.parse(request.options.body);
   assert.equal(body.text, "来点模型才能理解的表达");
   assert.equal(body.context.objects[0].kind, "circle");
   assert.deepEqual(app.engine.state.objects.map(object => object.kind), ["circle", "star"]);
+});
+
+test("语义实体由可信模板整体渲染并进入 SVG 导出", () => {
+  resetApp();
+  app.engine.execute([
+    { type: "scene_update", changes: { summary: "月夜屋顶猫", composition: "猫在屋顶，月亮在右上方" } },
+    { type: "entity_create", templateId: "roof", name: "屋顶", x: 250, y: 380, width: 500, height: 220, params: { color: "#596780" } },
+    { type: "entity_create", templateId: "cat", name: "猫", x: 450, y: 300, width: 140, height: 110, params: { direction: "left" } }
+  ]);
+  app.render();
+  const rendered = browser.elements["drawing-layer"].children;
+  assert.equal(rendered.length, 2);
+  assert.ok(rendered.every(element => element.tagName === "g"));
+  assert.equal(rendered[1].getAttribute("data-template"), "cat");
+  assert.equal(browser.elements["scene-summary"].textContent, "月夜屋顶猫");
+  assert.match(browser.elements["entity-list"].innerHTML, /猫/);
+
+  const OriginalBlob = Blob;
+  let capturedParts = null;
+  globalThis.Blob = function(parts, options) {
+    capturedParts = parts;
+    return new OriginalBlob(parts, options);
+  };
+  app.download("svg");
+  globalThis.Blob = OriginalBlob;
+  assert.match(capturedParts.join(""), /data-template="cat"/);
+});
+
+test("场景规划追加生成携带现有实体边界并反馈忽略内容", async () => {
+  resetApp();
+  app.engine.execute([{ type: "entity_create", templateId: "tree", name: "树", x: 50, y: 200, width: 180, height: 350 }]);
+  let request;
+  globalThis.fetch = async (url, options) => {
+    request = { url, options };
+    return { ok: true, json: async () => ({
+      kind: "scene_plan",
+      scene: { theme: "春日", mood: "明亮", composition: "右侧增加花丛", summary: "春日山野", ignored: ["飞龙"] },
+      entities: [{ templateId: "flowers", name: "花丛", role: "前景", x: 650, y: 500, width: 260, height: 140, params: { count: 12 } }]
+    }) };
+  };
+  await app.handleCommand("增加一片春日花丛和飞龙");
+  const body = JSON.parse(request.options.body);
+  assert.equal(request.url, "/api/interpret");
+  assert.deepEqual(body.context.entities[0].bounds, { x: 50, y: 200, width: 180, height: 350 });
+  assert.deepEqual(app.engine.state.objects.map(object => object.name), ["树", "花丛"]);
+  assert.match(browser.elements.feedback.textContent, /已忽略：飞龙/);
+  assert.equal(app.engine.undoStack.length, 2);
+});
+
+test("空有效场景规划不修改画布并明确反馈", async () => {
+  resetApp();
+  const before = JSON.stringify(app.engine.state);
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({
+    kind: "scene_plan",
+    scene: { theme: "", mood: "", composition: "", summary: "", ignored: ["飞龙"] },
+    entities: []
+  }) });
+  await app.handleCommand("画一条飞龙");
+  assert.equal(JSON.stringify(app.engine.state), before);
+  assert.match(browser.elements.feedback.textContent, /暂时无法表达：飞龙/);
+});
+
+test("浏览器端拒绝原始 SVG、未知模板、非法参数和超量场景", () => {
+  const scene = { theme: "", mood: "", composition: "", summary: "", ignored: [] };
+  const entity = { templateId: "cat", name: "猫", x: 0, y: 0, width: 100, height: 100 };
+  for (const result of [
+    { kind: "scene_plan", scene, entities: [{ ...entity, svg: "<path/>" }] },
+    { kind: "scene_plan", scene, entities: [{ ...entity, templateId: "dragon" }] },
+    { kind: "scene_plan", scene, entities: [{ ...entity, params: { href: "https://evil.test" } }] },
+    { kind: "scene_plan", scene, entities: Array.from({ length: 21 }, (_, index) => ({ ...entity, name: `猫${index}` })) },
+    { kind: "scene_plan", scene, entities: [entity], rawSvg: "<svg/>" }
+  ]) {
+    assert.throws(() => app.actionsFromInterpretation(result));
+  }
+});
+
+test("场景规划按受控 layer 层次创建实体", () => {
+  resetApp();
+  const actions = app.actionsFromInterpretation({
+    kind: "scene_plan",
+    scene: { theme: "", mood: "", composition: "", summary: "分层场景", ignored: [] },
+    entities: [
+      { templateId: "rain", name: "雨", x: 0, y: 0, width: 1000, height: 700, layer: 5 },
+      { templateId: "mountain", name: "山", x: 0, y: 250, width: 1000, height: 450, layer: -5 }
+    ]
+  }).actions;
+  app.engine.execute(actions);
+  assert.deepEqual(app.engine.state.objects.map(object => object.name), ["山", "雨"]);
+});
+
+test("三组绘本场景可持续修改且每轮只产生一条历史", () => {
+  const scenarios = [
+    {
+      plan: {
+        kind: "scene_plan", scene: { theme: "雨夜", mood: "安静", composition: "", summary: "雨中人物", ignored: [] },
+        entities: [
+          { templateId: "person", name: "人物", x: 350, y: 260, width: 100, height: 240 },
+          { templateId: "umbrella", name: "伞", x: 300, y: 180, width: 180, height: 150 },
+          { templateId: "rain", name: "雨", x: 0, y: 0, width: 1000, height: 700, params: { density: .5 } }
+        ]
+      },
+      revision: [
+        { type: "entity_update", target: "伞", changes: { params: { color: "#ef4444" } } },
+        { type: "move", target: "人物", dx: -50, dy: 0 },
+        { type: "entity_update", target: "雨", changes: { params: { density: .9 } } }
+      ]
+    },
+    {
+      plan: {
+        kind: "scene_plan", scene: { theme: "月夜", mood: "宁静", composition: "", summary: "月夜屋顶猫", ignored: [] },
+        entities: [
+          { templateId: "cat", name: "猫", x: 450, y: 320, width: 140, height: 110 },
+          { templateId: "moon", name: "月亮", x: 750, y: 80, width: 120, height: 120 },
+          { templateId: "cloud", name: "云", x: 200, y: 100, width: 220, height: 100 }
+        ]
+      },
+      revision: [
+        { type: "entity_update", target: "猫", changes: { params: { direction: "left" } } },
+        { type: "entity_update", target: "月亮", changes: { width: { multiply: 1.5 }, height: { multiply: 1.5 } } },
+        { type: "delete", target: "云" }
+      ]
+    },
+    {
+      plan: {
+        kind: "scene_plan", scene: { theme: "春日", mood: "明亮", composition: "", summary: "春日山野", ignored: [] },
+        entities: [
+          { templateId: "sun", name: "太阳", x: 700, y: 80, width: 120, height: 120 },
+          { templateId: "river", name: "河流", x: 100, y: 450, width: 800, height: 180 }
+        ]
+      },
+      revision: [
+        { type: "entity_create", templateId: "flowers", name: "花丛", x: 100, y: 500, width: 240, height: 120 },
+        { type: "move", target: "太阳", dx: -80, dy: 20 },
+        { type: "entity_update", target: "河流", changes: { params: { color: "#3b82f6" } } }
+      ]
+    }
+  ];
+  for (const scenario of scenarios) {
+    resetApp();
+    app.engine.execute(app.actionsFromInterpretation(scenario.plan).actions);
+    app.engine.execute(scenario.revision);
+    assert.equal(app.engine.undoStack.length, 2, scenario.plan.scene.summary);
+    app.engine.undo();
+    assert.equal(app.engine.state.scene.summary, scenario.plan.scene.summary);
+    app.engine.undo();
+    assert.equal(app.engine.state.objects.length, 0);
+  }
 });
 
 test("SVG 与 PNG 导出触发下载并为 PNG 绘制背景", async () => {
@@ -657,6 +806,16 @@ test("SVG 与 PNG 导出触发下载并为 PNG 绘制背景", async () => {
   assert.ok(browser.downloads.some(item => item.name?.startsWith("听画-") && item.name.endsWith(".png")));
   assert.deepEqual(browser.canvasCalls[0], ["fillRect", "#111827", 0, 0, 1000, 700]);
   assert.equal(browser.canvasCalls[1][0], "drawImage");
+});
+
+test("项目导出下载版本 2 可编辑实体数据", () => {
+  resetApp();
+  app.engine.execute([{ type: "entity_create", templateId: "cat", name: "猫", x: 100, y: 100, width: 120, height: 100, params: { direction: "left" } }]);
+  app.download("project");
+  const projectBlob = browser.downloads.find(item => item.blob?.type === "application/json")?.blob;
+  assert.ok(projectBlob);
+  assert.equal(app.saveProjectData().version, 2);
+  assert.equal(app.saveProjectData().state.objects[0].params.direction, "left");
 });
 
 test("SVG 导出包含背景矩形", () => {

@@ -444,6 +444,24 @@ blockquote {
   scrollbar-color: var(--line-strong) transparent;
 }
 
+.scene-card > p:not(.label) {
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+#entity-list,
+#ignored-list {
+  max-height: 110px;
+  margin: 8px 0 14px;
+  padding-left: 22px;
+  overflow: auto;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.8;
+}
+
 .examples {
   margin: 13px 0 0;
   padding: 0;

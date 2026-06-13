@@ -106,6 +106,34 @@ check("组合指令一次撤销全部回退", () => {
   if (engine.state.objects.length !== 0) throw new Error("一次撤销应回退全部3个图形");
 });
 
+console.log("\n📋 Scene — 绘本语义实体");
+
+check("雨中人物场景+修改 → 两条原子历史", () => {
+  const engine = new model.DrawingEngine();
+  engine.execute([
+    { type: "scene_update", changes: { theme: "雨夜", mood: "安静", composition: "人物居中", summary: "雨中人物", ignored: [] } },
+    { type: "entity_create", templateId: "person", name: "人物", x: 350, y: 250, width: 100, height: 240 },
+    { type: "entity_create", templateId: "umbrella", name: "伞", x: 300, y: 170, width: 180, height: 160 },
+    { type: "entity_create", templateId: "rain", name: "雨", x: 0, y: 0, width: 1000, height: 700, params: { density: .5 } }
+  ]);
+  engine.execute([
+    { type: "entity_update", target: "伞", changes: { params: { color: "#ef4444" } } },
+    { type: "move", target: "人物", dx: -50, dy: 0 },
+    { type: "entity_update", target: "雨", changes: { params: { density: .9 } } }
+  ]);
+  if (engine.undoStack.length !== 2) throw new Error("场景生成和修改应各产生一条历史");
+  if (engine.state.objects.find(o => o.name === "伞").params.color !== "#ef4444") throw new Error("伞未改红");
+});
+
+check("版本 2 工程保留场景和实体", () => {
+  const engine = new model.DrawingEngine();
+  engine.execute([{ type: "entity_create", templateId: "cat", name: "猫", x: 100, y: 100, width: 120, height: 100, params: { direction: "left" } }]);
+  const project = engine.serializeProject();
+  const restored = new model.DrawingEngine();
+  restored.loadProject(project);
+  if (project.version !== 2 || restored.state.objects[0].params.direction !== "left") throw new Error("工程恢复失败");
+});
+
 // ── Results ──
 console.log(`\n${'='.repeat(40)}`);
 console.log(`通过: ${passed}  失败: ${failed}  总计: ${passed + failed}`);

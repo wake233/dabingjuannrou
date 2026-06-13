@@ -9,9 +9,10 @@ from urllib.error import HTTPError, URLError
 import server.config
 import server.client
 from server.config import CONFIG, load_env_file, load_config_file
-from server.schema import MAX_AUDIO_BYTES, validate_actions
+from server.schema import MAX_AUDIO_BYTES, validate_actions, validate_interpretation
 from server.client import (
-    ServiceError, parse_json_content, parse_with_llm, transcribe_audio, service_status,
+    ServiceError, parse_json_content, parse_with_llm, parse_interpretation_content,
+    transcribe_audio, service_status,
 )
 from server.handler import AppHandler
 from server.server import ExclusiveThreadingHTTPServer
@@ -320,16 +321,13 @@ class ServerTests(unittest.TestCase):
 
     def test_system_prompt_contains_composite_decomposition_instructions(self):
         prompt = SYSTEM_PROMPT
-        self.assertIn("语义概念拆解", prompt)
-        self.assertIn("拆解为多个 create 动作", prompt)
-        self.assertIn("画一棵树", prompt)
-        self.assertIn("画一朵云", prompt)
-        self.assertIn("画一个房子", prompt)
-        self.assertIn("画一个星星图案", prompt)
-        self.assertIn("画一排", prompt)
-        self.assertIn("画一列", prompt)
+        self.assertIn("scene_plan", prompt)
+        self.assertIn("scene_revision", prompt)
+        self.assertIn("实体模板白名单", prompt)
+        self.assertIn("不得输出 svg", prompt)
+        self.assertIn("现有实体边界", prompt)
         self.assertIn("画布尺寸为 1000×700", prompt)
-        self.assertIn("中心位于 (500, 350)", prompt)
+        self.assertIn("storybook", prompt)
 
     def test_parse_json_content_accepts_tree_decomposition(self):
         # LLM returns tree as trunk rect + crown circle
@@ -373,6 +371,52 @@ class ServerTests(unittest.TestCase):
         ])
         with self.assertRaises(ValueError):
             parse_json_content(invalid_response)
+
+    def test_interpretation_union_accepts_actions_scene_plan_and_revision(self):
+        actions = {"kind": "actions", "actions": [{"type": "create", "kind": "circle"}]}
+        plan = {
+            "kind": "scene_plan",
+            "scene": {"theme": "雨夜", "mood": "安静", "composition": "人物在左", "summary": "雨中人物", "ignored": ["龙"]},
+            "entities": [
+                {"templateId": "person", "name": "人物", "role": "主角", "x": 200, "y": 250, "width": 100, "height": 220, "params": {"direction": "right"}},
+                {"templateId": "rain", "name": "雨", "role": "天气", "x": 0, "y": 0, "width": 1000, "height": 700, "params": {"density": 0.7}},
+            ],
+        }
+        revision = {"kind": "scene_revision", "actions": [
+            {"type": "entity_update", "target": "雨", "changes": {"params": {"density": 0.9}}},
+            {"type": "scene_update", "changes": {"mood": "热闹"}},
+        ]}
+        for result in [actions, plan, revision]:
+            self.assertEqual(validate_interpretation(result), result)
+            self.assertEqual(parse_interpretation_content(json.dumps(result, ensure_ascii=False)), result)
+        self.assertEqual(parse_interpretation_content('[{"type":"create","kind":"circle"}]')["kind"], "actions")
+
+    def test_interpretation_rejects_unknown_template_raw_svg_illegal_params_and_too_many_entities(self):
+        scene = {"theme": "", "mood": "", "composition": "", "summary": "", "ignored": []}
+        base = {"templateId": "cat", "name": "猫", "x": 0, "y": 0, "width": 100, "height": 100}
+        invalid = [
+            {"kind": "scene_plan", "scene": scene, "entities": [{**base, "templateId": "dragon"}]},
+            {"kind": "scene_plan", "scene": scene, "entities": [{**base, "svg": "<path/>"}]},
+            {"kind": "scene_plan", "scene": scene, "entities": [{**base, "params": {"href": "https://evil.test"}}]},
+            {"kind": "scene_plan", "scene": scene, "entities": [{**base, "name": f"猫{i}"} for i in range(21)]},
+            {"kind": "scene_revision", "actions": [{"type": "entity_update", "target": "猫", "changes": {"params": {"svg": "<path/>"}}}]},
+        ]
+        for result in invalid:
+            with self.subTest(result=result), self.assertRaises(ValueError):
+                validate_interpretation(result)
+
+    def test_interpret_endpoint_returns_validated_union_result(self):
+        handler = object.__new__(AppHandler)
+        handler.path = "/api/interpret"
+        body = json.dumps({"text": "画一个雨夜场景", "context": {}}).encode("utf-8")
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.rfile = MagicMock()
+        handler.rfile.read.return_value = body
+        handler.send_json = MagicMock()
+        result = {"kind": "scene_plan", "scene": {"theme": "", "mood": "", "composition": "", "summary": "", "ignored": []}, "entities": []}
+        with patch("server.handler.interpret_with_llm", return_value=result):
+            handler.do_POST()
+        self.assertEqual(handler.send_json.call_args.args, (200, result))
 
 
 if __name__ == "__main__":

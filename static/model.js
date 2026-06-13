@@ -1,9 +1,11 @@
+import { ENTITY_TEMPLATES, emptyScene, validateEntityParams } from "./scene_schema.js";
+
 export const CANVAS = { width: 1000, height: 700 };
 
 export const ALLOWED_ACTIONS = new Set([
   "create", "select", "update", "move", "align", "distribute",
   "duplicate", "delete", "group", "ungroup", "history", "canvas",
-  "export", "help", "status"
+  "export", "help", "status", "entity_create", "entity_update", "scene_update"
 ]);
 
 const KINDS = new Set(["rect", "circle", "ellipse", "triangle", "star", "line", "arrow", "text"]);
@@ -14,6 +16,7 @@ const UPDATE_FIELDS = new Set(["fill", "stroke", "strokeWidth", "opacity", "rota
 const PROJECT_NAME_MAX_LENGTH = 100;
 const HISTORY_LIMIT = 50;
 const SHAPE_ID_PATTERN = /^shape-[1-9]\d*$/;
+const ENTITY_ID_PATTERN = /^entity-[1-9]\d*$/;
 const GROUP_ID_PATTERN = /^group-[1-9]\d*$/;
 const ACTION_FIELDS = {
   create: new Set(["type", "kind", "position", "x", "y", "width", "height", "fill", "stroke", "strokeWidth", "opacity", "rotation", "text"]),
@@ -30,7 +33,10 @@ const ACTION_FIELDS = {
   canvas: new Set(["type", "operation", "color"]),
   export: new Set(["type", "format"]),
   help: new Set(["type"]),
-  status: new Set(["type"])
+  status: new Set(["type"]),
+  entity_create: new Set(["type", "templateId", "name", "role", "x", "y", "width", "height", "rotation", "opacity", "layer", "params"]),
+  entity_update: new Set(["type", "target", "changes"]),
+  scene_update: new Set(["type", "changes"])
 };
 
 const TYPE_NAMES = {
@@ -60,12 +66,15 @@ function chineseIndex(number) {
 export function initialState() {
   return {
     objects: [], selection: [], background: "#ffffff", counters: {},
-    lastCreated: [], nextId: 1, groups: {}, nextGroupId: 1
+    lastCreated: [], nextId: 1, groups: {}, nextGroupId: 1, scene: emptyScene()
   };
 }
 
 export function validateActions(actions) {
-  if (!Array.isArray(actions) || actions.length === 0 || actions.length > 20) {
+  const sceneBatch = Array.isArray(actions) && actions.length <= 21
+    && actions.filter(action => action?.type === "scene_update").length === 1
+    && actions.filter(action => action?.type === "entity_create").length === actions.length - 1;
+  if (!Array.isArray(actions) || actions.length === 0 || (actions.length > 20 && !sceneBatch)) {
     throw new Error("动作数量必须在 1 到 20 之间");
   }
   for (const action of actions) {
@@ -147,6 +156,42 @@ function validateText(value) {
   if (typeof value !== "string" || value.length > 1000) throw new Error("文字字段无效");
 }
 
+function validateProjectString(value, allowEmpty = false, maximum = 1000) {
+  if (typeof value !== "string" || (!allowEmpty && !value) || value.length > maximum) throw new Error("文本字段无效");
+}
+
+function validateSceneChanges(changes) {
+  if (!isRecord(changes) || !Object.keys(changes).length) throw new Error("场景修改内容无效");
+  const allowed = new Set(["theme", "mood", "composition", "summary", "ignored"]);
+  for (const [field, value] of Object.entries(changes)) {
+    if (!allowed.has(field)) throw new Error(`不能修改场景属性 ${field}`);
+    if (field === "ignored") {
+      if (!Array.isArray(value) || value.length > 20 || value.some(item => typeof item !== "string" || !item || item.length > 100)) {
+        throw new Error("场景忽略项无效");
+      }
+    } else validateProjectString(value, true);
+  }
+}
+
+function validateEntityChanges(changes) {
+  if (!isRecord(changes) || !Object.keys(changes).length) throw new Error("实体修改内容无效");
+  const allowed = new Set(["name", "role", "width", "height", "rotation", "opacity", "params", "zOrder"]);
+  for (const [field, value] of Object.entries(changes)) {
+    if (!allowed.has(field)) throw new Error(`不能修改实体属性 ${field}`);
+    if (["name", "role"].includes(field)) validateProjectString(value, field === "role", 100);
+    else if (["width", "height"].includes(field)) validateChangeValue(field, value);
+    else if (field === "rotation" || field === "opacity" || field === "zOrder") validateChangeValue(field, value);
+    else if (!isRecord(value)) throw new Error("实体参数修改无效");
+    else {
+      for (const [param, paramValue] of Object.entries(value)) {
+        const templateId = Object.keys(ENTITY_TEMPLATES).find(id => ENTITY_TEMPLATES[id].includes(param));
+        if (!templateId) throw new Error("实体参数修改无效");
+        validateEntityParams(templateId, { [param]: paramValue });
+      }
+    }
+  }
+}
+
 function validateDimension(value, allowZero = false) {
   const minimum = allowZero ? 0 : Number.EPSILON;
   if (!isFiniteNumber(value, minimum)) throw new Error("尺寸字段无效");
@@ -171,6 +216,25 @@ function validateChangeValue(field, value) {
 
 function validateAction(action) {
   validateKnownFields(action);
+  if (action.type === "entity_create") {
+    requireFields(action, "templateId", "name", "x", "y", "width", "height");
+    if (!(action.templateId in ENTITY_TEMPLATES)) throw new Error("未知实体模板");
+    validateProjectString(action.name, false, 100);
+    if ("role" in action) validateProjectString(action.role, true, 100);
+    if (!isFiniteNumber(action.x) || !isFiniteNumber(action.y)) throw new Error("实体坐标无效");
+    validateDimension(action.width); validateDimension(action.height);
+    if ("rotation" in action && !isFiniteNumber(action.rotation)) throw new Error("实体旋转无效");
+    if ("opacity" in action && !isFiniteNumber(action.opacity, 0, 1)) throw new Error("实体透明度无效");
+    if ("layer" in action && (!Number.isSafeInteger(action.layer) || Math.abs(action.layer) > 1000)) throw new Error("实体层次无效");
+    validateEntityParams(action.templateId, action.params || {});
+    return;
+  }
+  if (action.type === "entity_update") {
+    requireFields(action, "target", "changes"); validateTarget(action.target); validateEntityChanges(action.changes); return;
+  }
+  if (action.type === "scene_update") {
+    requireFields(action, "changes"); validateSceneChanges(action.changes); return;
+  }
   if (action.type === "create") {
     requireFields(action, "kind");
     if (!KINDS.has(action.kind)) throw new Error("图形类型无效");
@@ -237,7 +301,7 @@ function validateAction(action) {
   }
   if (action.type === "export") {
     requireFields(action, "format");
-    if (!["svg", "png"].includes(action.format)) throw new Error("导出格式无效");
+    if (!["svg", "png", "project"].includes(action.format)) throw new Error("导出格式无效");
   }
 }
 
@@ -326,8 +390,29 @@ function createObject(state, action, context = {}) {
   return object;
 }
 
+function createEntity(state, action) {
+  if (state.objects.some(object => object.name === action.name)) throw new Error("实体名称已存在");
+  const entity = {
+    id: `entity-${state.nextId++}`, name: action.name, kind: "entity", templateId: action.templateId,
+    role: action.role || "", x: action.x, y: action.y, width: action.width, height: action.height,
+    rotation: action.rotation || 0, opacity: action.opacity ?? 1, layer: action.layer || 0, params: copy(action.params || {})
+  };
+  state.objects.push(entity);
+  state.selection = [entity.id];
+  state.lastCreated = [entity.id];
+  return entity;
+}
+
+function duplicateEntityName(state, name) {
+  let index = 1;
+  let candidate = `${name}副本`;
+  while (state.objects.some(object => object.name === candidate)) candidate = `${name}副本${++index}`;
+  return candidate;
+}
+
 function applyAction(state, action, context) {
   if (action.type === "create") return createObject(state, action, context);
+  if (action.type === "entity_create") return createEntity(state, action);
   context.lastCompositeId = null;
   if (action.type === "select") {
     if (action.target === "none") state.selection = [];
@@ -343,6 +428,9 @@ function applyAction(state, action, context) {
     for (const object of targets) {
       for (const [key, value] of Object.entries(action.changes || {})) {
         if (!allowed.has(key)) throw new Error(`不能修改属性 ${key}`);
+        if (object.kind === "entity" && !["opacity", "rotation", "width", "height", "zOrder"].includes(key)) {
+          throw new Error(`语义实体不能修改属性 ${key}`);
+        }
         if (key === "zOrder") continue;
         object[key] = value && typeof value === "object" && Number.isFinite(value.multiply)
           ? object[key] * value.multiply : value;
@@ -353,6 +441,31 @@ function applyAction(state, action, context) {
       const others = state.objects.filter(o => !ids.has(o.id));
       state.objects = action.changes.zOrder === "top" ? [...others, ...targets] : [...targets, ...others];
     }
+    return;
+  }
+  if (action.type === "entity_update") {
+    const targets = requireTargets(state, action.target);
+    if (targets.some(object => object.kind !== "entity")) throw new Error("实体修改只能用于语义实体");
+    for (const object of targets) {
+      for (const [key, value] of Object.entries(action.changes)) {
+        if (key === "zOrder") continue;
+        if (key === "params") {
+          const merged = { ...object.params, ...value };
+          validateEntityParams(object.templateId, merged);
+          object.params = merged;
+        } else if (["width", "height"].includes(key) && isRecord(value)) object[key] *= value.multiply;
+        else object[key] = value;
+      }
+    }
+    if (action.changes.zOrder) {
+      const ids = new Set(targets.map(object => object.id));
+      const others = state.objects.filter(object => !ids.has(object.id));
+      state.objects = action.changes.zOrder === "top" ? [...others, ...targets] : [...targets, ...others];
+    }
+    return;
+  }
+  if (action.type === "scene_update") {
+    state.scene = { ...state.scene, ...copy(action.changes), style: "storybook" };
     return;
   }
   if (action.type === "move") {
@@ -404,8 +517,10 @@ function applyAction(state, action, context) {
     const targets = requireTargets(state, action.target);
     const ids = [];
     for (const original of targets) {
-      const duplicate = createObject(state, { ...original, kind: original.kind, x: original.x + 25, y: original.y + 25 }, context);
-      duplicate.text = original.text;
+      const duplicate = original.kind === "entity"
+        ? createEntity(state, { ...original, name: duplicateEntityName(state, original.name), x: original.x + 25, y: original.y + 25 })
+        : createObject(state, { ...original, kind: original.kind, x: original.x + 25, y: original.y + 25 }, context);
+      if (original.kind !== "entity") duplicate.text = original.text;
       ids.push(duplicate.id);
     }
     state.selection = ids; state.lastCreated = ids;
@@ -421,6 +536,7 @@ function applyAction(state, action, context) {
   }
   if (action.type === "group") {
     const targets = requireTargets(state, action.target, 2);
+    if (targets.some(object => object.kind === "entity")) throw new Error("语义实体不能组合");
     const targetIds = new Set(targets.map(o => o.id));
     for (const group of Object.values(state.groups)) {
       group.members = group.members.filter(id => !targetIds.has(id));
@@ -442,7 +558,7 @@ function applyAction(state, action, context) {
   }
   if (action.type === "canvas") {
     if (action.operation === "clear") {
-      state.objects = []; state.selection = []; state.lastCreated = []; state.groups = {};
+      state.objects = []; state.selection = []; state.lastCreated = []; state.groups = {}; state.scene = emptyScene();
     } else if (action.operation === "background") state.background = action.color;
     else throw new Error("未知画布操作");
     return;
@@ -499,7 +615,7 @@ export class DrawingEngine {
   serializeProject() {
     return {
       format: "listen-paint",
-      version: 1,
+      version: 2,
       state: copy(this.state),
       history: { undo: copy(this.undoStack), redo: copy(this.redoStack) }
     };
@@ -516,10 +632,11 @@ export class DrawingEngine {
 
 function validateState(state) {
   if (!isRecord(state)) throw new Error("工程状态无效");
-  const required = ["objects", "selection", "background", "counters", "lastCreated", "nextId", "groups", "nextGroupId"];
+  const required = ["objects", "selection", "background", "counters", "lastCreated", "nextId", "groups", "nextGroupId", "scene"];
   if (Object.keys(state).some(key => !required.includes(key)) || required.some(key => !(key in state))) throw new Error("工程状态字段无效");
   if (!Array.isArray(state.objects) || !Array.isArray(state.selection) || !Array.isArray(state.lastCreated)) throw new Error("工程对象结构无效");
   validateColor(state.background, false);
+  validateScene(state.scene);
   if (!isRecord(state.counters) || !isRecord(state.groups) || !Number.isSafeInteger(state.nextId) || state.nextId < 1
     || !Number.isSafeInteger(state.nextGroupId) || state.nextGroupId < 1) throw new Error("工程计数器无效");
   for (const [kind, count] of Object.entries(state.counters)) {
@@ -531,18 +648,27 @@ function validateState(state) {
   let maxShapeId = 0;
   for (const object of state.objects) {
     if (!isRecord(object)) throw new Error("工程图形无效");
-    const fields = new Set(["id", "name", "kind", "x", "y", "width", "height", "fill", "stroke", "strokeWidth", "opacity", "rotation", "text", "groupId"]);
-    if (Object.keys(object).some(key => !fields.has(key)) || !isProjectId(object.id, SHAPE_ID_PATTERN)
+    const entity = object.kind === "entity";
+    const fields = entity
+      ? new Set(["id", "name", "kind", "templateId", "role", "x", "y", "width", "height", "opacity", "rotation", "layer", "params"])
+      : new Set(["id", "name", "kind", "x", "y", "width", "height", "fill", "stroke", "strokeWidth", "opacity", "rotation", "text", "groupId"]);
+    if (Object.keys(object).some(key => !fields.has(key)) || !isProjectId(object.id, entity ? ENTITY_ID_PATTERN : SHAPE_ID_PATTERN)
       || !isProjectString(object.name) || ids.has(object.id) || names.has(object.name)
-      || (object.groupId !== undefined && object.groupId !== null && !isProjectId(object.groupId, GROUP_ID_PATTERN))) {
+      || (!entity && object.groupId !== undefined && object.groupId !== null && !isProjectId(object.groupId, GROUP_ID_PATTERN))) {
       throw new Error("工程图形 ID 或字段无效");
     }
-    validateAction({ type: "create", kind: object.kind, x: object.x, y: object.y, width: object.width, height: object.height,
-      fill: object.fill, stroke: object.stroke, strokeWidth: object.strokeWidth, opacity: object.opacity,
-      rotation: object.rotation, text: object.text });
-    const nameIndex = generatedNameIndex(object.kind, object.name);
-    if (nameIndex === null) throw new Error("工程图形名称无效");
-    maxNameIndexes[object.kind] = Math.max(maxNameIndexes[object.kind] || 0, nameIndex);
+    if (entity) {
+      validateAction({ type: "entity_create", templateId: object.templateId, name: object.name, role: object.role,
+        x: object.x, y: object.y, width: object.width, height: object.height, opacity: object.opacity,
+        rotation: object.rotation, layer: object.layer, params: object.params });
+    } else {
+      validateAction({ type: "create", kind: object.kind, x: object.x, y: object.y, width: object.width, height: object.height,
+        fill: object.fill, stroke: object.stroke, strokeWidth: object.strokeWidth, opacity: object.opacity,
+        rotation: object.rotation, text: object.text });
+      const nameIndex = generatedNameIndex(object.kind, object.name);
+      if (nameIndex === null) throw new Error("工程图形名称无效");
+      maxNameIndexes[object.kind] = Math.max(maxNameIndexes[object.kind] || 0, nameIndex);
+    }
     maxShapeId = Math.max(maxShapeId, projectIdNumber(object.id));
     ids.add(object.id);
     names.add(object.name);
@@ -579,16 +705,24 @@ function validateState(state) {
 }
 
 export function validateProject(project) {
-  if (!isRecord(project) || project.format !== "listen-paint" || project.version !== 1
+  if (!isRecord(project) || project.format !== "listen-paint" || ![1, 2].includes(project.version)
     || !isRecord(project.history) || !Array.isArray(project.history.undo) || !Array.isArray(project.history.redo)
     || project.history.undo.length > HISTORY_LIMIT || project.history.redo.length > HISTORY_LIMIT
     || Object.keys(project).some(key => !["format", "version", "state", "history"].includes(key))
     || Object.keys(project.history).some(key => !["undo", "redo"].includes(key))) throw new Error("工程格式或版本无效");
+  const migrate = state => project.version === 1 ? { ...copy(state), scene: emptyScene() } : state;
   return {
-    state: validateState(project.state),
+    state: validateState(migrate(project.state)),
     history: {
-      undo: project.history.undo.map(validateState),
-      redo: project.history.redo.map(validateState)
+      undo: project.history.undo.map(state => validateState(migrate(state))),
+      redo: project.history.redo.map(state => validateState(migrate(state)))
     }
   };
+}
+
+function validateScene(scene) {
+  if (!isRecord(scene) || scene.style !== "storybook") throw new Error("场景元数据无效");
+  const fields = new Set(["style", "theme", "mood", "composition", "summary", "ignored"]);
+  if (Object.keys(scene).some(key => !fields.has(key))) throw new Error("场景元数据字段无效");
+  validateSceneChanges({ theme: scene.theme, mood: scene.mood, composition: scene.composition, summary: scene.summary, ignored: scene.ignored });
 }
