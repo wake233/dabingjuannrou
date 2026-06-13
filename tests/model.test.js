@@ -279,6 +279,17 @@ test("复合创建后的布局操作保留整组选择反馈", () => {
   assert.equal(new Set(engine.state.objects.map(object => object.y)).size, 1);
 });
 
+test("批量创建与后续独立布局指令共享整组选择", () => {
+  for (const command of ["画三个矩形", "画一排三个矩形"]) {
+    const engine = new DrawingEngine();
+    engine.execute(parseCommand(command));
+
+    assert.equal(engine.state.selection.length, 3, command);
+    assert.doesNotThrow(() => engine.execute(parseCommand("顶部对齐", { selected: true })), command);
+    assert.equal(new Set(engine.state.objects.map(object => object.y)).size, 1, command);
+  }
+});
+
 test("浏览器动作元数据、零线宽与类型选择边界", () => {
   assert.doesNotThrow(() => validateActions([{ type: "create", kind: "rect", _compositeId: 1 }]));
   for (const value of [0, -1, 1.2, "1", null]) {

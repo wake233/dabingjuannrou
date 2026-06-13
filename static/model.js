@@ -314,9 +314,14 @@ function createObject(state, action, context = {}) {
     rotation: Number(action.rotation) || 0, text: action.text || "文字"
   };
   state.objects.push(object);
-  state.selection = [object.id];
-  if (action._compositeId && context.lastCompositeId === action._compositeId) state.lastCreated.push(object.id);
-  else state.lastCreated = [object.id];
+  const continuesComposite = action._compositeId && context.lastCompositeId === action._compositeId;
+  if (continuesComposite) {
+    state.selection.push(object.id);
+    state.lastCreated.push(object.id);
+  } else {
+    state.selection = [object.id];
+    state.lastCreated = [object.id];
+  }
   context.lastCompositeId = action._compositeId || null;
   return object;
 }
