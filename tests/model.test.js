@@ -264,6 +264,19 @@ test("复合创建后的上下文作用于全部组件且普通创建不合并",
   assert.equal(engine.state.objects.find(o => o.id === engine.state.lastCreated[0]).kind, "rect");
 });
 
+test("复合创建后的布局操作保留整组选择反馈", () => {
+  const engine = new DrawingEngine();
+  engine.execute(parseCommand("画一排三个矩形，然后顶部对齐"));
+
+  assert.equal(engine.state.objects.length, 3);
+  assert.equal(engine.state.selection.length, 3);
+  assert.deepEqual(
+    new Set(engine.state.selection),
+    new Set(engine.state.objects.map(object => object.id))
+  );
+  assert.equal(new Set(engine.state.objects.map(object => object.y)).size, 1);
+});
+
 test("浏览器动作元数据、零线宽与类型选择边界", () => {
   assert.doesNotThrow(() => validateActions([{ type: "create", kind: "rect", _compositeId: 1 }]));
   for (const value of [0, -1, 1.2, "1", null]) {

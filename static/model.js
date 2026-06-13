@@ -379,6 +379,7 @@ function applyAction(state, action, context) {
       else if (action.mode === "vcenter") o.y = (box.top + box.bottom - o.height) / 2;
       else throw new Error("未知对齐方式");
     }
+    state.selection = targets.map(o => o.id);
     return;
   }
   if (action.type === "distribute") {
@@ -391,6 +392,7 @@ function applyAction(state, action, context) {
     const gap = (end - start - occupied) / (sorted.length - 1);
     let cursor = start;
     sorted.forEach(o => { o[axis] = cursor; cursor += o[size] + gap; });
+    state.selection = targets.map(o => o.id);
     return;
   }
   if (action.type === "duplicate") {
