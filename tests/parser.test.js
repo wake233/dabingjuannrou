@@ -5,6 +5,10 @@ import { chineseNumber, decomposeComposite, normalizeText, parseCommand, splitCo
 test("中文数字与常见识别文本归一化", () => {
   assert.equal(chineseNumber("五十"), 50);
   assert.equal(chineseNumber("一百二十"), 120);
+  assert.equal(chineseNumber("两百五"), 250);
+  assert.equal(chineseNumber("三千零六"), 3006);
+  assert.equal(chineseNumber("一百二十三"), 123);
+  assert.equal(chineseNumber("错误"), null);
   assert.match(normalizeText("撤消，正中央"), /撤销.*中央/);
 });
 
@@ -34,7 +38,7 @@ test("这些图形只引用选择，不会退化为全部图形", () => {
 
 test("命名对象和画布指令", () => {
   assert.equal(parseCommand("选择矩形1")[0].target, "矩形一");
-  assert.equal(parseCommand("清空画布")[0].requiresConfirmation, true);
+  assert.equal(parseCommand("清空画布")[0].operation, "clear");
   assert.equal(splitCommands("撤销，然后重做").length, 2);
 });
 
@@ -293,7 +297,7 @@ test("fuzzyCorrect 修正背景和画布相关词", () => {
   const canvasActions = parseCommand("青空画部");
   assert.equal(canvasActions.length, 1);
   assert.equal(canvasActions[0].type, "canvas");
-  assert.equal(canvasActions[0].requiresConfirmation, true);
+  assert.equal(canvasActions[0].operation, "clear");
 
   const bgActions = parseCommand("背色设为自色");
   assert.equal(bgActions.length, 1);
@@ -351,6 +355,12 @@ test("复合指令与其他子句混用时正确拆解", () => {
   assert.equal(rowAndAlign.length, 4);
   assert.equal(rowAndAlign[3].type, "align");
   assert.equal(rowAndAlign[3].mode, "top");
+
+  const manyAndAlign = parseCommand("画三个矩形，然后顶部对齐");
+  assert.equal(manyAndAlign.length, 4);
+  assert.equal(new Set(manyAndAlign.slice(0, 3).map(action => action.y)).size, 3);
+  assert.equal(manyAndAlign[3].type, "align");
+  assert.equal(manyAndAlign[3].mode, "top");
 });
 
 test("纯复合指令仍然独立工作", () => {
@@ -360,4 +370,27 @@ test("纯复合指令仍然独立工作", () => {
   assert.equal(parseCommand("画一个笑脸").length, 4);
   assert.equal(parseCommand("画一排五个圆").length, 5);
   assert.equal(parseCommand("画一列三个矩形").length, 3);
+});
+
+test("按类型选择保留中文类型目标且所有图形仍为 all", () => {
+  assert.equal(parseCommand("选择所有圆形")[0].target, "圆形");
+  assert.equal(parseCommand("选择全部矩形")[0].target, "矩形");
+  assert.equal(parseCommand("选择所有图形")[0].target, "all");
+});
+
+test("一排一列在画布内等间距且超上限明确拒绝", () => {
+  for (const [command, axis, limit] of [
+    ["画一排二十个圆", "x", 1000],
+    ["画一列二十个矩形", "y", 700]
+  ]) {
+    const actions = parseCommand(command);
+    assert.equal(actions.length, 20);
+    assert.ok(actions.every(action => action.width > 0 && action.height >= 0));
+    assert.ok(actions.every(action => action.x >= 0 && action.y >= 0
+      && action.x + action.width <= 1000 && action.y + action.height <= 700));
+    const gaps = actions.slice(1).map((action, index) => action[axis] - actions[index][axis]);
+    assert.ok(gaps.every(gap => Math.abs(gap - gaps[0]) < 1e-8));
+    assert.ok(actions.at(-1)[axis] < limit);
+  }
+  assert.throws(() => parseCommand("画一排二十一 个圆".replace(" ", "")), /不能超过 20/);
 });

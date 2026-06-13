@@ -28,7 +28,31 @@ class FakeElement {
   }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   getAttribute(name) { return this.attributes[name] ?? null; }
+  removeAttribute(name) { delete this.attributes[name]; }
   replaceChildren(...children) { this.children = children; }
+  cloneNode(deep = false) {
+    const clone = new FakeElement(this.tagName, this.id);
+    clone.attributes = { ...this.attributes };
+    clone.style = { ...this.style };
+    clone.children = deep ? this.children.map(child => child.cloneNode(true)) : [];
+    return clone;
+  }
+  querySelector(selector) {
+    if (selector.startsWith("#") && this.id === selector.slice(1)) return this;
+    for (const child of this.children) {
+      const found = child.querySelector(selector);
+      if (found) return found;
+    }
+    return null;
+  }
+  querySelectorAll(selector) {
+    const matches = [];
+    if (selector === '[filter="url(#selection-glow)"]' && this.getAttribute("filter") === "url(#selection-glow)") matches.push(this);
+    if (selector === ".preview" && this.classList.contains("preview")) matches.push(this);
+    for (const child of this.children) matches.push(...child.querySelectorAll(selector));
+    return matches;
+  }
+  remove() { this.removed = true; }
   click() { this.clicked = true; this.onclick?.(); }
 }
 
@@ -36,9 +60,8 @@ function installBrowser() {
   const ids = [
     "drawing-layer", "preview-layer", "canvas", "canvas-shell", "object-count", "selection-count", "object-list",
     "feedback", "toast", "transcript", "latency", "voice-status", "listen-button",
-    "wave", "listen-label", "fallback-panel", "fallback-browser", "fallback-stop",
-    "mode-indicator", "mode-switch-button", "download-model-button",
-    "download-progress", "download-progress-fill", "download-progress-text"
+    "wave", "listen-label", "fallback-panel", "retry-cloud", "fallback-stop",
+    "mode-indicator"
   ];
   const elements = Object.fromEntries(ids.map(id => [id, new FakeElement(id === "canvas" ? "svg" : "div", id)]));
   elements["fallback-panel"].hidden = true;
@@ -46,6 +69,13 @@ function installBrowser() {
   const canvasCalls = [];
   const recognitions = [];
   let objectUrl = 0;
+  const storage = new Map();
+  globalThis.localStorage = {
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, String(value)),
+    removeItem: key => storage.delete(key),
+    clear: () => storage.clear()
+  };
 
   globalThis.document = {
     getElementById: id => elements[id],
@@ -109,7 +139,11 @@ function installBrowser() {
   };
   globalThis.XMLSerializer = class {
     serializeToString(element) {
-      return `<svg id="${element.id}" style="background:${element.style.background || ""}"></svg>`;
+      const serialize = item => {
+        const attrs = Object.entries(item.attributes).map(([key, value]) => ` ${key}="${value}"`).join("");
+        return `<${item.tagName}${item.id ? ` id="${item.id}"` : ""}${attrs}>${item.children.filter(child => !child.removed).map(serialize).join("")}${item.textContent || ""}</${item.tagName}>`;
+      };
+      return serialize(element);
     }
   };
   globalThis.URL = {
@@ -130,6 +164,7 @@ const browser = installBrowser();
 const app = await import("../static/app.js");
 
 function resetApp() {
+  app._resetCloudConfig();
   app.engine.state = initialState();
   app.engine.undoStack = [];
   app.engine.redoStack = [];
@@ -186,185 +221,8 @@ test("低置信度的未知指令不会回退模型或执行动作", async () =>
   assert.equal(browser.elements.feedback.textContent, "没有听清，请再说一次");
 });
 
-test("语音识别接受未提供置信度的最终文本并执行命令", async () => {
-  resetApp();
-  const recognition = browser.recognitions[0];
-  // Use test helper to directly enter browser recognition (bypassing wake-word flow)
-  app.testEnterFullListening("browser");
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(recognition.startCount > 0, true);
-  assert.equal(browser.elements["voice-status"].textContent, "浏览器识别");
-
-  recognition.emitResult(" 画一个矩形 ", 0);
-  await new Promise(resolve => setTimeout(resolve, 0));
-
-  assert.equal(app.engine.state.objects.length, 1);
-  assert.equal(app.engine.state.objects[0].kind, "rect");
-  assert.equal(browser.elements.transcript.textContent, "画一个矩形");
-  browser.elements["listen-button"].click();
-});
-
-test("主按钮直接启动当前浏览器识别模式", async () => {
-  await app.switchVoiceMode("browser");
-  const recognition = browser.recognitions[0];
-  const startsBefore = recognition.startCount;
-
-  browser.elements["listen-button"].click();
-  await new Promise(resolve => setTimeout(resolve, 0));
-
-  assert.equal(app.isWakeWordActive(), false);
-  assert.equal(recognition.startCount > startsBefore, true);
-  assert.equal(browser.elements["voice-status"].textContent, "浏览器识别");
-  browser.elements["listen-button"].click();
-});
-
-test("语音识别会从多个候选中选择可解析的清晰指令", async () => {
-  resetApp();
-  const recognition = browser.recognitions[0];
-  assert.equal(recognition.maxAlternatives, 10);
-  assert.equal(recognition.continuous, false);
-  // SpeechRecognition.phrases is NOT set — it's unsupported for zh-CN
-  assert.equal(recognition.phrases.length, 0);
-
-  // "画一个矩形" scores higher than "花一个局型" (keyword bonus + parseable),
-  // so it wins under the new scoring system (Task 3.2)
-  recognition.emitAlternatives([
-    { text: "花一个局型", confidence: .81 },
-    { text: "画一个矩形", confidence: .62 }
-  ]);
-  await new Promise(resolve => setTimeout(resolve, 0));
-
-  assert.equal(app.engine.state.objects.length, 1);
-  assert.equal(app.engine.state.objects[0].kind, "rect");
-  assert.equal(browser.elements.transcript.textContent, "画一个矩形");
-});
-
-test("稳定且可解析的浏览器中间结果会快速执行", async () => {
-  resetApp();
-  const recognition = browser.recognitions[0];
-  app.testEnterFullListening("browser");
-
-  recognition.emitResult("画一个圆形", 0, false);
-  assert.equal(app.engine.state.objects.length, 0);
-  await new Promise(resolve => setTimeout(resolve, 450));
-
-  assert.equal(app.engine.state.objects.length, 1);
-  assert.equal(app.engine.state.objects[0].kind, "circle");
-  browser.elements["listen-button"].click();
-});
-
-test("未完成的浏览器中间结果不会提前执行", async () => {
-  resetApp();
-  const recognition = browser.recognitions[0];
-  app.testEnterFullListening("browser");
-
-  recognition.emitResult("画一个圆形然后", 0, false);
-  await new Promise(resolve => setTimeout(resolve, 450));
-
-  assert.equal(app.engine.state.objects.length, 0);
-  browser.elements["listen-button"].click();
-});
-
-test("快速执行后相同最终结果不会重复执行", async () => {
-  resetApp();
-  const recognition = browser.recognitions[0];
-  app.testEnterFullListening("browser");
-
-  recognition.emitResult("画一个矩形", 0, false);
-  await new Promise(resolve => setTimeout(resolve, 450));
-  recognition.emitResult("画一个矩形", .9, true);
-  await new Promise(resolve => setTimeout(resolve, 0));
-
-  assert.equal(app.engine.state.objects.length, 1);
-  browser.elements["listen-button"].click();
-});
-
-// ── Phase 3.2: Candidate scoring tests ────────────────────────
-
-test("候选项评分：含指令关键词的高置信度噪声 vs 低置信度有效指令 — 选有效指令", () => {
-  resetApp();
-  const recognition = browser.recognitions[0];
-
-  // "嗯" (conf 0.9) has high confidence but is noise
-  // "画圆" (conf 0.7) has keywords + is parseable
-  recognition.emitAlternatives([
-    { text: "嗯", confidence: .9 },
-    { text: "画圆", confidence: .7 }
-  ]);
-  // Wait for async handleCommand
-  setTimeout(() => {}, 0);
-
-  assert.equal(app.engine.state.objects.length, 1);
-  assert.equal(app.engine.state.objects[0].kind, "circle");
-  assert.equal(browser.elements.transcript.textContent, "画圆");
-});
-
-test("候选项评分：可解析的低置信度指令胜过高置信度不可解析候选", () => {
-  resetApp();
-  const recognition = browser.recognitions[0];
-
-  // "画一个矩形" (conf 0.8) is parseable → +10
-  // "乱码文本xyz" (conf 0.9) is not parseable → no +10 bonus
-  recognition.emitAlternatives([
-    { text: "画一个矩形", confidence: .8 },
-    { text: "乱码文本xyz", confidence: .9 }
-  ]);
-
-  assert.equal(app.engine.state.objects.length, 1);
-  assert.equal(app.engine.state.objects[0].kind, "rect");
-  assert.equal(browser.elements.transcript.textContent, "画一个矩形");
-});
-
-test("候选项评分：所有候选得分 <= 0 时返回最高置信度候选", () => {
-  // Direct test of chooseRecognitionAlternative without going through handleCommand
-  const result = [
-    { transcript: "嗯", confidence: .9 },
-    { transcript: "啊", confidence: .5 }
-  ];
-  result.isFinal = true;
-  const selected = app.chooseRecognitionAlternative(result);
-
-  // Both are noise (short, no keywords), scores: "嗯"=-0.5, "啊"=-2.5
-  // Neither > 0, fallback to highest confidence → "嗯"
-  assert.equal(selected.text, "嗯");
-});
-
-test("候选项评分：置信度相同时含更多关键词者胜出", () => {
-  resetApp();
-  const recognition = browser.recognitions[0];
-
-  // "画一个" has 1 keyword ("画"), "画一个矩形" has 1 keyword ("画") but both parseable
-  // "画矩形" wins because shorter text, but both parseable + same confidence
-  // Actually both have "画" keyword, same score. Test tie-break by confidence.
-  recognition.emitAlternatives([
-    { text: "画圆", confidence: .85 },
-    { text: "画矩形", confidence: .85 }
-  ]);
-  setTimeout(() => {}, 0);
-
-  // Both score the same, tie-break by confidence (same), first wins
-  assert.equal(app.engine.state.objects.length, 1);
-});
-
-test("候选项评分：确认窗口期间优先匹配确认词", () => {
-  resetApp();
-  // Create a state with pending confirmation
-  app.engine.execute([{ type: "canvas", operation: "clear", requiresConfirmation: true }]);
-
-  const result = [
-    { transcript: "画一个圆", confidence: .9 },
-    { transcript: "确认", confidence: .6 }
-  ];
-  result.isFinal = true;
-
-  // Trigger confirmation state
-  app.needsRiskConfirmation([{ type: "canvas", operation: "clear", requiresConfirmation: true }]);
-
-  // Direct test: during confirmation, confirmation keywords take priority
-  // Since we can't easily set pendingConfirmation in test, verify scoring logic
-  const selected = app.chooseRecognitionAlternative(result);
-  // Without pendingConfirmation, "画一个圆" scores higher (parseable + keyword)
-  assert.equal(selected.text, "画一个圆");
+test("正式应用不创建浏览器 SpeechRecognition 实例", () => {
+  assert.equal(browser.recognitions.length, 0);
 });
 
 test("静音检测会忽略短噪声、在停顿后提交并限制最长录音", () => {
@@ -497,23 +355,6 @@ test("预览渲染：不可解析的中间结果清空预览层", () => {
   globalThis.performance.now = origNow;
 });
 
-test("预览渲染：浏览器识别最终结果清空预览层", () => {
-  resetApp();
-  app.engine.execute([{ type: "create", kind: "rect" }]);
-
-  const recognition = browser.recognitions[0];
-  app.testEnterFullListening("browser");
-
-  // First, simulate interim result to populate preview
-  app.tryPreviewRender("画一个圆");
-  assert.ok(browser.elements["preview-layer"].children.length >= 2);
-
-  // Now simulate final result — preview should be cleared
-  recognition.emitResult("画一个圆形", 0.9);
-  assert.equal(browser.elements["preview-layer"].children.length, 0,
-    "preview should be cleared on final result");
-});
-
 test("预览渲染：节流跳过过快或变更过小的中间结果", () => {
   resetApp();
   const origNow = globalThis.performance.now;
@@ -603,39 +444,118 @@ test("云端转写成功后执行绘图指令", async () => {
   assert.equal(app.engine.state.objects[0].kind, "circle");
 });
 
-test("云端转写失败后等待用户确认降级", async () => {
-  globalThis.fetch = async () => ({ ok: false, json: async () => ({ error: "云端语音识别未配置" }) });
+test("云端转写失败后提供重试和停止操作", async () => {
+  globalThis.fetch = async () => ({ ok: false, json: async () => ({ error: "请求过多", errorCode: "rate_limited", retryable: true }) });
 
   await app.transcribeAudio(new Blob(["audio"], { type: "audio/webm" }));
 
-  assert.equal(browser.elements["voice-status"].textContent, "等待降级确认");
+  assert.equal(browser.elements["voice-status"].textContent, "云端识别不可用，请重试或停止");
+  assert.match(browser.elements.feedback.textContent, /云端请求过多或额度不足/);
   assert.equal(browser.elements["fallback-panel"].hidden, false);
+  assert.equal(typeof browser.elements["retry-cloud"].onclick, "function");
   browser.elements["fallback-stop"].click();
   assert.equal(browser.elements["voice-status"].textContent, "已暂停");
 });
 
-test("云端 API 返回 404 时自动切换浏览器识别", async () => {
-  const recognition = browser.recognitions[0];
-  const startsBefore = recognition.startCount;
-  globalThis.fetch = async () => ({
-    ok: false,
-    status: 404,
-    headers: { get: () => "text/html" },
-    json: async () => ({})
-  });
+test("验收指标事件按提交、转写、命令完成顺序发布且不包含音频", async () => {
+  resetApp();
+  const events = [];
+  const originalDispatch = globalThis.dispatchEvent;
+  const OriginalCustomEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class { constructor(_name, options) { this.detail = options.detail; } };
+  globalThis.dispatchEvent = event => events.push(event.detail);
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ text: "画一个圆形" }) });
 
-  await app.transcribeAudio(new Blob(["audio"], { type: "audio/webm" }));
+  const segmentSubmittedAt = performance.now();
+  globalThis.dispatchEvent(new CustomEvent("listen-paint-acceptance", { detail: { type: "segment-submitted", segmentId: 7 } }));
+  await app.transcribeAudio(new Blob(["audio"], { type: "audio/webm" }), { segmentId: 7, segmentSubmittedAt });
+
+  assert.deepEqual(events.map(event => event.type), ["segment-submitted", "transcription-completed", "command-completed"]);
+  assert.equal(events[1].transcript, "画一个圆形");
+  assert.equal(events[2].success, true);
+  assert.ok(events.every(event => !("audio" in event) && !("blob" in event)));
+  globalThis.dispatchEvent = originalDispatch;
+  globalThis.CustomEvent = OriginalCustomEvent;
+});
+
+test("浏览器能力错误使用统一分类提示", async () => {
+  const events = [];
+  const originalDispatch = globalThis.dispatchEvent;
+  const OriginalCustomEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class { constructor(_name, options) { this.detail = options.detail; } };
+  globalThis.dispatchEvent = event => events.push(event.detail);
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: {} } });
+  delete window.MediaRecorder;
+  app._resetCloudConfig();
+  app.testEnterFullListening();
   await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(events.at(-1).errorCode, "browser_unsupported");
+  assert.match(browser.elements.feedback.textContent, /浏览器不支持云端录音/);
+  globalThis.dispatchEvent = originalDispatch;
+  globalThis.CustomEvent = OriginalCustomEvent;
+});
 
-  assert.equal(app.getVoiceMode(), "browser");
-  assert.equal(browser.elements["fallback-panel"].hidden, true);
-  assert.equal(browser.elements["voice-status"].textContent, "API 服务不可用，已切换浏览器识别");
-  browser.elements["listen-button"].click();
+test("麦克风权限拒绝使用统一分类提示", async () => {
+  const events = [];
+  const originalDispatch = globalThis.dispatchEvent;
+  const OriginalCustomEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class { constructor(_name, options) { this.detail = options.detail; } };
+  globalThis.dispatchEvent = event => events.push(event.detail);
+  const denied = new Error("denied");
+  denied.name = "NotAllowedError";
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { mediaDevices: { getUserMedia: async () => { throw denied; } } }
+  });
+  window.MediaRecorder = class {};
+  window.AudioContext = class {};
+  app.testEnterFullListening();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(events.at(-1).errorCode, "microphone_permission");
+  assert.match(browser.elements.feedback.textContent, /麦克风权限被拒绝/);
+  globalThis.dispatchEvent = originalDispatch;
+  globalThis.CustomEvent = OriginalCustomEvent;
+});
+
+test("重试云端识别会重新检查配置并恢复录音", async () => {
+  const recorders = [];
+  class FakeMediaRecorder {
+    constructor() { this.state = "inactive"; this.mimeType = "audio/webm"; recorders.push(this); }
+    start() { this.state = "recording"; }
+    stop() { this.state = "inactive"; this.onstop?.(); }
+  }
+  class FakeAudioContext {
+    constructor() { this.state = "running"; }
+    createAnalyser() { return { fftSize: 2048, getByteTimeDomainData(values) { values.fill(128); } }; }
+    createMediaStreamSource() { return { connect() {} }; }
+    close() {}
+  }
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } }
+  });
+  globalThis.MediaRecorder = FakeMediaRecorder;
+  window.MediaRecorder = FakeMediaRecorder;
+  window.AudioContext = FakeAudioContext;
   globalThis.fetch = async () => ({
     ok: true,
     json: async () => ({ apiVersion: 1, cloudTranscriptionConfigured: true, cloudTranscriptionIssue: null, commandModelConfigured: true })
   });
-  await app.loadVoiceCapabilities();
+
+  await app.retryCloudRecognition();
+
+  assert.equal(browser.elements["fallback-panel"].hidden, true);
+  assert.equal(browser.elements["voice-status"].textContent, "云端识别");
+  assert.equal(recorders.at(-1).state, "recording");
+  browser.elements["listen-button"].click();
+});
+
+test("休息和停止聆听会直接停止云端识别", async () => {
+  app.testEnterFullListening();
+  await app.handleCommand("休息");
+
+  assert.equal(browser.elements.feedback.textContent, "已停止聆听");
+  assert.equal(browser.elements["voice-status"].textContent, "已暂停");
 });
 
 test("云端模式启动采集，并在语音反馈期间暂停后恢复", async () => {
@@ -691,118 +611,19 @@ test("云端模式启动采集，并在语音反馈期间暂停后恢复", async
   assert.equal(tracks[0].stopped, true);
 });
 
-test("语音播报失败后仍恢复浏览器识别", async () => {
-  app.testEnterFullListening("browser");
-  const recognition = browser.recognitions[0];
-  const startsBefore = recognition.startCount;
-  const originalSpeak = speechSynthesis.speak;
-  speechSynthesis.speak = utterance => utterance.onerror?.({ error: "synthesis-failed" });
-
-  await app.handleCommand("画一个矩形");
-  await new Promise(resolve => setTimeout(resolve, 0));
-
-  assert.equal(recognition.startCount > startsBefore, true);
-  speechSynthesis.speak = originalSpeak;
-  browser.elements["listen-button"].click();
-});
-
-test("浏览器不支持语音播报时退化为文字反馈并恢复识别", async () => {
-  app.testEnterFullListening("browser");
-  const recognition = browser.recognitions[0];
-  const startsBefore = recognition.startCount;
-  const originalUtterance = globalThis.SpeechSynthesisUtterance;
-  const originalSynthesis = globalThis.speechSynthesis;
-  delete globalThis.SpeechSynthesisUtterance;
-  delete globalThis.speechSynthesis;
-
-  await app.handleCommand("画一个圆形");
-  await new Promise(resolve => setTimeout(resolve, 0));
-
-  assert.match(browser.elements.feedback.textContent, /已执行/);
-  assert.equal(recognition.startCount > startsBefore, true);
-  globalThis.SpeechSynthesisUtterance = originalUtterance;
-  globalThis.speechSynthesis = originalSynthesis;
-  browser.elements["listen-button"].click();
-});
-
-test("麦克风权限错误会停止自动重启并显示明确提示", () => {
-  const recognition = browser.recognitions[0];
-  recognition.emitError("not-allowed");
-  recognition.onend();
-
-  assert.equal(browser.elements["listen-button"].classList.contains("active"), false);
-  assert.equal(browser.elements["voice-status"].textContent, "麦克风权限被拒绝，请在浏览器中允许麦克风");
-});
-
-test("浏览器识别网络错误会停止自动重启并显示明确提示", () => {
-  app.testEnterFullListening("browser");
-  const recognition = browser.recognitions[0];
-  recognition.emitError("network");
-  recognition.onend();
-
-  assert.equal(browser.elements["listen-button"].classList.contains("active"), false);
-  assert.equal(browser.elements["voice-status"].textContent, "浏览器语音识别服务网络不可用");
-});
-
-test("云端未配置时自动切换到浏览器识别", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({
-    ok: true,
-    json: async () => ({ apiVersion: 1, cloudTranscriptionConfigured: false, cloudTranscriptionIssue: "missing_api_key", commandModelConfigured: false })
-  });
-  await app.switchVoiceMode("cloud");
-
-  await app.loadVoiceCapabilities();
-
-  assert.equal(app.getVoiceMode(), "browser");
-  assert.equal(browser.elements["voice-status"].textContent, "云端未配置 OPENAI_API_KEY，已切换浏览器识别");
-  browser.elements["mode-switch-button"].click();
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(app.getVoiceMode(), "browser");
-  assert.equal(browser.elements.toast.textContent, "当前没有其他可用的语音识别模式");
-  globalThis.fetch = async () => ({
-    ok: true,
-    json: async () => ({ apiVersion: 1, cloudTranscriptionConfigured: true, cloudTranscriptionIssue: null, commandModelConfigured: true })
-  });
-  await app.loadVoiceCapabilities();
-  globalThis.fetch = originalFetch;
-});
-
-test("清空画布支持确认与取消", async () => {
+test("清空画布直接执行", async () => {
   resetApp();
   await app.handleCommand("画一个矩形");
-  await app.handleCommand("清空画布");
   assert.equal(app.engine.state.objects.length, 1);
-  assert.match(browser.elements.feedback.textContent, /八秒内说确认或取消/);
-  await app.handleCommand("取消");
-  assert.equal(app.engine.state.objects.length, 1);
-  assert.equal(browser.elements.feedback.textContent, "已取消操作");
-
   await app.handleCommand("清空画布");
-  await app.handleCommand("确认");
   assert.equal(app.engine.state.objects.length, 0);
-  assert.equal(browser.elements.feedback.textContent, "已确认并执行");
 });
 
-test("删除、全体修改和三个修改动作需要确认", () => {
-  assert.equal(app.needsRiskConfirmation([{ type: "delete", target: "selected" }]), true);
-  assert.equal(app.needsRiskConfirmation([{ type: "move", target: "all", dx: 10, dy: 0 }]), true);
-  assert.equal(app.needsRiskConfirmation([
-    { type: "create", kind: "rect" },
-    { type: "create", kind: "circle" },
-    { type: "create", kind: "star" }
-  ]), true);
-  assert.equal(app.needsRiskConfirmation([{ type: "create", kind: "rect" }]), false);
-});
-
-test("删除指令确认前不会修改画布", async () => {
+test("删除指令直接执行", async () => {
   resetApp();
   await app.handleCommand("画一个矩形");
-  await app.handleCommand("删除它");
   assert.equal(app.engine.state.objects.length, 1);
-  assert.match(browser.elements.feedback.textContent, /删除操作需要确认/);
-
-  await app.handleCommand("确认");
+  await app.handleCommand("删除它");
   assert.equal(app.engine.state.objects.length, 0);
 });
 
@@ -876,227 +697,26 @@ test("SVG 导出白色背景时不添加多余背景矩形", () => {
   assert.ok(!/<rect[^>]*fill="#ffffff"/.test(capturedParts.join("")), "默认白色背景不应添加多余的 rect");
 });
 
-test("确认窗口期间非确认指令被忽略", async () => {
+test("选中图形和预览存在时导出源不含选择高亮或预览", () => {
   resetApp();
-  await app.handleCommand("画一个矩形");
-  assert.equal(app.engine.state.objects.length, 1);
-
-  // Trigger confirmation (delete needs confirmation)
-  await app.handleCommand("删除它");
-  assert.equal(app.engine.state.objects.length, 1); // Still there, pending confirm
-  assert.match(browser.elements.feedback.textContent, /删除操作需要确认/);
-
-  // Try to execute another command during confirmation
-  await app.handleCommand("画一个圆形");
-  assert.equal(app.engine.state.objects.length, 1); // Should NOT have created a circle
-  assert.match(browser.elements.feedback.textContent, /请说确认或取消/);
-
-  // Confirmation should still be pending
-  await app.handleCommand("确认");
-  assert.equal(app.engine.state.objects.length, 0); // Now deleted
+  app.engine.execute([{ type: "create", kind: "rect" }, { type: "select", target: "all" }]);
+  app.render();
+  browser.elements["preview-layer"].replaceChildren(new FakeElement("rect"));
+  const OriginalBlob = Blob;
+  let capturedParts = null;
+  globalThis.Blob = function(parts, options) {
+    capturedParts = parts;
+    return new OriginalBlob(parts, options);
+  };
+  app.download("svg");
+  globalThis.Blob = OriginalBlob;
+  const source = capturedParts.join("");
+  assert.doesNotMatch(source, /selection-glow/);
+  assert.doesNotMatch(source, /preview-layer[^>]*><rect/);
 });
+
 
 // ── Phase 1: Hands-free Operation ─────────────────────────────
-
-test("已有权限时自动启动后台唤醒词聆听", async () => {
-  // Mock getUserMedia to succeed (permission already granted)
-  const tracks = [{ stopped: false, stop() { this.stopped = true; } }];
-  class FakeAudioContext {
-    createAnalyser() { return { fftSize: 2048, getByteTimeDomainData(v) { v.fill(128); } }; }
-    createMediaStreamSource() { return { connect() {} }; }
-    close() {}
-  }
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    value: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => tracks }) } }
-  });
-  window.AudioContext = FakeAudioContext;
-
-  // Call tryAutoStart to simulate page load with permission
-  await app.tryAutoStart();
-  await new Promise(r => setTimeout(r, 50));
-
-  // Should be in wake-word listening mode
-  assert.equal(app.isWakeWordActive(), true);
-  assert.equal(browser.elements["voice-status"].textContent, "后台聆听中 (唤醒词)");
-  assert.equal(browser.elements["listen-button"].classList.contains("active"), true);
-
-  // Clean up
-  browser.elements["listen-button"].click();
-  await new Promise(r => setTimeout(r, 50));
-  assert.equal(app.isWakeWordActive(), false);
-});
-
-test("页面初始化不会自动进入后台唤醒词模式", () => {
-  assert.equal(app.isWakeWordActive(), false);
-});
-
-test("后台唤醒词监听在切换识别模式后保持后台状态", async () => {
-  await app.switchVoiceMode("cloud");
-  app.startWakeWordListening();
-  await new Promise(r => setTimeout(r, 0));
-
-  await app.switchVoiceMode("browser");
-  await new Promise(r => setTimeout(r, 0));
-
-  assert.equal(app.getVoiceMode(), "browser");
-  assert.equal(app.isWakeWordActive(), true);
-  assert.equal(browser.elements["voice-status"].textContent, "后台聆听中 (唤醒词)");
-
-  browser.elements["listen-button"].click();
-});
-
-test("后台唤醒词监听在语音播报期间暂停并在结束后恢复", async () => {
-  let pendingUtterance;
-  const originalSpeak = speechSynthesis.speak;
-  speechSynthesis.speak = utterance => { pendingUtterance = utterance; };
-  app.startWakeWordListening();
-  await new Promise(r => setTimeout(r, 0));
-
-  await app.handleCommand("画一个圆形");
-  assert.equal(app.isWakeWordActive(), false);
-
-  pendingUtterance.onend();
-  await new Promise(r => setTimeout(r, 0));
-  assert.equal(app.isWakeWordActive(), true);
-
-  speechSynthesis.speak = originalSpeak;
-  browser.elements["listen-button"].click();
-});
-
-test("无权限时自动启动不会激活后台聆听", async () => {
-  // Mock getUserMedia to reject (no permission)
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    value: { mediaDevices: { getUserMedia: async () => { throw new DOMException("Permission denied", "NotAllowedError"); } } }
-  });
-  window.AudioContext = undefined;
-  globalThis.MediaRecorder = undefined;
-  window.MediaRecorder = undefined;
-
-  // Ensure clean state: stop any active listening
-  if (app.isWakeWordActive()) {
-    browser.elements["listen-button"].click();
-    await new Promise(r => setTimeout(r, 50));
-  }
-
-  // Call tryAutoStart — should fail silently with no permission
-  await app.tryAutoStart();
-  await new Promise(r => setTimeout(r, 50));
-
-  // Should NOT be in wake-word mode
-  assert.equal(app.isWakeWordActive(), false);
-});
-
-test("唤醒词检测触发全聆听模式", async () => {
-  await app.switchVoiceMode("cloud");
-  // Set up mocks for wake word → full listening flow
-  const tracks = [{ stopped: false, stop() { this.stopped = true; } }];
-  const recorders = [];
-  class FakeMediaRecorder {
-    constructor() { this.state = "inactive"; this.mimeType = "audio/webm"; recorders.push(this); }
-    start() { this.state = "recording"; }
-    stop() { this.state = "inactive"; this.onstop?.(); }
-  }
-  class FakeAudioContext {
-    createAnalyser() { return { fftSize: 2048, getByteTimeDomainData(v) { v.fill(200); } }; }
-    createMediaStreamSource() { return { connect() {} }; }
-    close() {}
-  }
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    value: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => tracks }) } }
-  });
-  globalThis.MediaRecorder = FakeMediaRecorder;
-  window.MediaRecorder = FakeMediaRecorder;
-  window.AudioContext = FakeAudioContext;
-
-  // Override performance.now to advance time (needed for energy threshold timing)
-  let perfNow = 0;
-  const origPerf = globalThis.performance;
-  globalThis.performance = { now: () => { perfNow += 100; return perfNow; } };
-
-  // Start wake word listening
-  app.startWakeWordListening();
-  await new Promise(r => setTimeout(r, 500)); // Wait for energy monitor to trigger recognition
-
-  // Find the wake-word recognition (not the main one from setupVoice)
-  const mainRecognition = browser.recognitions[0];
-  const wakeRecognition = browser.recognitions.find(r => r !== mainRecognition);
-  assert.ok(wakeRecognition, "wake-word recognition should be created by energy monitor");
-
-  // Simulate wake word detection
-  wakeRecognition.emitResult("听画", 0.9);
-  await new Promise(r => setTimeout(r, 200));
-
-  // After wake word, should be in full listening (cloud) mode
-  // TTS "听画已唤醒" fires, then startCloudListening begins
-  // Check that recording started
-  assert.equal(recorders.length > 0, true, "cloud recording should have started");
-  assert.equal(recorders.at(-1).state, "recording");
-
-  // Restore performance
-  globalThis.performance = origPerf;
-
-  // Clean up
-  browser.elements["listen-button"].click();
-  await new Promise(r => setTimeout(r, 50));
-});
-
-test("全聆听模式说休息返回后台聆听", async () => {
-  // Set up mocks
-  const tracks = [{ stopped: false, stop() { this.stopped = true; } }];
-  class FakeAudioContext {
-    createAnalyser() { return { fftSize: 2048, getByteTimeDomainData(v) { v.fill(128); } }; }
-    createMediaStreamSource() { return { connect() {} }; }
-    close() {}
-  }
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    value: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => tracks }) } }
-  });
-  window.AudioContext = FakeAudioContext;
-
-  // Enter full listening (cloud) mode via test helper
-  app.testEnterFullListening("cloud");
-  await new Promise(r => setTimeout(r, 50));
-
-  // Now say "休息" to return to wake-word listening
-  await app.handleCommand("休息");
-  await new Promise(r => setTimeout(r, 100));
-
-  // Should now be in wake-word listening mode
-  assert.equal(app.isWakeWordActive(), true);
-  assert.equal(browser.elements["voice-status"].textContent, "后台聆听中 (唤醒词)");
-
-  // Clean up
-  browser.elements["listen-button"].click();
-  await new Promise(r => setTimeout(r, 50));
-});
-
-test("确认取消后画布状态不变并可执行新指令", async () => {
-  resetApp();
-  await app.handleCommand("画一个矩形");
-  assert.equal(app.engine.state.objects.length, 1);
-
-  // Trigger confirmation
-  await app.handleCommand("清空画布");
-  assert.match(browser.elements.feedback.textContent, /八秒内说确认或取消/);
-  assert.equal(app.engine.state.objects.length, 1); // Not cleared yet
-
-  // Cancel the confirmation
-  await app.handleCommand("取消");
-  assert.equal(browser.elements.feedback.textContent, "已取消操作");
-
-  // Verify canvas unchanged after cancel
-  assert.equal(app.engine.state.objects.length, 1);
-
-  // New commands should work normally after cancel
-  await app.handleCommand("画一个圆形");
-  assert.equal(app.engine.state.objects.length, 2);
-});
-
-// ── Phase 5: Offline Recognition (Vosk) ─────────────────────────
 
 test("vosk_recognizer 模块导出 createVoskRecognizer API", async () => {
   const vosk = await import("../static/vosk_recognizer.js");
@@ -1239,78 +859,23 @@ test("VoskRecognizer getStatus 返回正确状态字符串", async () => {
   assert.equal(recognizer.isReady(), false);
 });
 
-test("app.js 导出 switchVoiceMode 和 getVoiceMode 函数", () => {
-  assert.equal(typeof app.switchVoiceMode, "function", "switchVoiceMode should be exported");
-  assert.equal(typeof app.getVoiceMode, "function", "getVoiceMode should be exported");
-  assert.equal(typeof app.isVoskReady, "function", "isVoskReady should be exported");
-});
+test("工程自动保存只在成功提交后更新并支持安全加载与丢弃", async () => {
+  localStorage.clear();
+  resetApp();
+  await app.handleCommand("画一个矩形");
+  const stored = localStorage.getItem("listen-paint-autosave-v1");
+  assert.ok(stored);
+  const saved = JSON.parse(stored);
+  assert.equal(saved.state.objects.length, 1);
+  await app.handleCommand("顶部对齐");
+  assert.equal(localStorage.getItem("listen-paint-autosave-v1"), stored);
 
-test("getVoiceMode 初始返回 cloud", () => {
-  // At module load time in test environment, voiceMode should be "cloud"
-  assert.equal(app.getVoiceMode(), "cloud");
-});
-
-test("switchVoiceMode 可在模式间切换", async () => {
-  // Mock IndexedDB for model availability check
-  const origIndexedDB = globalThis.indexedDB;
-  globalThis.indexedDB = {
-    open: () => {
-      const request = {};
-      setTimeout(() => {
-        if (request.onerror) request.onerror({ target: { error: new Error("not available") } });
-      }, 10);
-      return request;
-    }
-  };
-
-  // Start in cloud mode, switch to browser, then back to cloud
-  assert.equal(app.getVoiceMode(), "cloud");
-
-  await app.switchVoiceMode("browser");
-  assert.equal(app.getVoiceMode(), "browser");
-
-  // Verify mode indicator updated
-  assert.equal(browser.elements["mode-indicator"].textContent, "🌐↓ 浏览器");
-
-  await app.switchVoiceMode("cloud");
-  assert.equal(app.getVoiceMode(), "cloud");
-  assert.equal(browser.elements["mode-indicator"].textContent, "🌐 云端");
-
-  // Switch to offline (will fall back to cloud since model unavailable)
-  await app.switchVoiceMode("offline");
-  // Should have fallen back to cloud since model is not available
-  assert.equal(app.getVoiceMode(), "cloud");
-
-  // Clean up
-  globalThis.indexedDB = origIndexedDB;
-});
-
-test("模式切换后 UI 指示器更新", async () => {
-  const origIndexedDB = globalThis.indexedDB;
-  globalThis.indexedDB = {
-    open: () => {
-      const request = {};
-      setTimeout(() => {
-        if (request.onerror) request.onerror({ target: { error: new Error("not available") } });
-      }, 10);
-      return request;
-    }
-  };
-
-  // Ensure clean state
-  if (app.getVoiceMode() !== "cloud") {
-    await app.switchVoiceMode("cloud");
-  }
-
-  await app.switchVoiceMode("browser");
-  assert.equal(browser.elements["mode-indicator"].textContent, "🌐↓ 浏览器");
-
-  await app.switchVoiceMode("cloud");
-  assert.equal(browser.elements["mode-indicator"].textContent, "🌐 云端");
-
-  globalThis.indexedDB = origIndexedDB;
-});
-
-test("isVoskReady 在无模型时返回 false", () => {
-  assert.equal(app.isVoskReady(), false);
+  const project = app.saveProjectData();
+  app.engine.state = initialState();
+  app.loadProjectData(project);
+  assert.equal(app.engine.state.objects.length, 1);
+  assert.throws(() => app.loadProjectData({ format: "listen-paint", version: 99 }));
+  assert.equal(app.engine.state.objects.length, 1);
+  await app.handleCommand("丢弃上次工程");
+  assert.equal(localStorage.getItem("listen-paint-autosave-v1"), null);
 });

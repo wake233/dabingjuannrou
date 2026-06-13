@@ -1,0 +1,16 @@
+{
+  "valid": [
+    [{"type": "create", "kind": "rect", "strokeWidth": 0}],
+    [{"type": "select", "target": "圆形"}],
+    [{"type": "update", "target": "last", "changes": {"fill": "#abcdef", "opacity": 0}}],
+    [{"type": "move", "target": "selected", "dx": 0, "dy": -10}],
+    [{"type": "canvas", "operation": "clear"}]
+  ],
+  "invalid": [
+    [{"type": "create", "kind": "rect", "fill": "red"}],
+    [{"type": "select", "target": []}],
+    [{"type": "update", "target": "last", "changes": {"href": "https://example.test"}}],
+    [{"type": "history", "operation": "undo"}, {"type": "help"}],
+    [{"type": "help", "unknown": true}]
+  ]
+}

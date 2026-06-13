@@ -7,65 +7,92 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header>
-    <div>
-      <p class="eyebrow">VOICE-FIRST VECTOR STUDIO</p>
-      <h1>听画</h1>
-      <p>说出想法，让图形落在画布上。</p>
-    </div>
-    <div class="voice-panel">
-      <div id="mode-indicator" class="mode-indicator">🌐 云端</div>
-      <button id="mode-switch-button" type="button" class="mode-switch" aria-label="切换识别模式" title="切换识别模式">切换模式</button>
-      <button id="download-model-button" type="button" class="download-model" hidden aria-label="下载离线模型" title="下载离线语音识别模型">下载离线模型</button>
-      <div id="download-progress" class="download-progress" hidden>
-        <div id="download-progress-fill" class="download-progress-fill"></div>
-        <span id="download-progress-text">下载中...</span>
-      </div>
-      <button id="listen-button" type="button" aria-label="开始语音控制">
-        <span class="mic-dot"></span><span id="listen-label">授权麦克风并开始</span>
-      </button>
+  <header class="site-header">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><span></span></div>
       <div>
-        <strong id="voice-status">尚未启动</strong>
-        <span id="latency">本地指令等待中</span>
+        <p class="eyebrow">VOICE-FIRST VECTOR STUDIO</p>
+        <h1>听画</h1>
+        <p class="brand-note">说出想法，让图形落在画布上。</p>
+      </div>
+    </div>
+    <section class="voice-panel" aria-label="语音控制台">
+      <div class="voice-panel-heading">
+        <span class="panel-kicker">语音控制台</span>
+        <div id="mode-indicator" class="mode-indicator"><span aria-hidden="true"></span>云端识别</div>
+      </div>
+      <div class="voice-controls">
+        <button id="listen-button" type="button" aria-label="授权麦克风并开始聆听" aria-pressed="false">
+          <span class="mic-icon" aria-hidden="true">
+            <span class="mic-capsule"></span>
+            <span class="mic-stand"></span>
+          </span>
+          <span id="listen-label">授权麦克风并开始</span>
+        </button>
+        <div class="voice-copy" aria-live="polite">
+          <strong id="voice-status">尚未启动</strong>
+          <span id="latency">本地指令等待中</span>
+        </div>
       </div>
       <div id="fallback-panel" class="fallback-panel" hidden>
-        <button id="fallback-browser" type="button">使用浏览器识别</button>
+        <button id="retry-cloud" type="button">重试云端识别</button>
         <button id="fallback-stop" type="button">停止聆听</button>
       </div>
-    </div>
+    </section>
   </header>
 
-  <main>
-    <section class="canvas-shell" id="canvas-shell">
-      <svg id="canvas" viewBox="0 0 1000 700" role="img" aria-label="语音绘图画布">
-        <defs>
-          <marker id="arrow-head" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L9,3 z" fill="context-stroke"/>
-          </marker>
-          <filter id="selection-glow"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#fb7185"/></filter>
-        </defs>
-        <g id="preview-layer" class="preview"></g>
-        <g id="drawing-layer"></g>
-      </svg>
-      <div class="listening-wave" id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  <main class="studio-layout">
+    <section class="workspace" aria-label="绘画工作台">
+      <div class="canvas-heading">
+        <div>
+          <span class="canvas-index">01</span>
+          <div>
+            <p class="panel-kicker">当前画布</p>
+            <h2>未命名作品</h2>
+          </div>
+        </div>
+        <span class="canvas-size">1000 × 700</span>
+      </div>
+      <div class="canvas-shell" id="canvas-shell">
+        <svg id="canvas" viewBox="0 0 1000 700" role="img" aria-label="语音绘图画布">
+          <defs>
+            <marker id="arrow-head" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L9,3 z" fill="context-stroke"/>
+            </marker>
+            <filter id="selection-glow"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#d95c4f"/></filter>
+          </defs>
+          <g id="preview-layer" class="preview"></g>
+          <g id="drawing-layer"></g>
+        </svg>
+        <div class="listening-wave" id="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
     </section>
 
-    <aside>
-      <section class="transcript-card">
-        <p class="label">刚刚听到</p>
+    <aside class="studio-sidebar">
+      <section class="side-card transcript-card">
+        <div class="card-heading">
+          <p class="label">刚刚听到</p>
+          <span class="live-mark" aria-hidden="true"></span>
+        </div>
         <blockquote id="transcript">点击“开始聆听”并允许麦克风权限。</blockquote>
         <p id="feedback">试试说：“画一个红色圆形放在左边”</p>
       </section>
-      <section>
-        <p class="label">画布状态</p>
+      <section class="side-card state-card">
+        <div class="card-heading">
+          <p class="label">画布状态</p>
+          <span class="card-number">02</span>
+        </div>
         <div class="stats">
           <div><strong id="object-count">0</strong><span>图形</span></div>
           <div><strong id="selection-count">0</strong><span>已选</span></div>
         </div>
         <ol id="object-list"><li>画布还是空的</li></ol>
       </section>
-      <section>
-        <p class="label">可以这样说</p>
+      <section class="side-card examples-card">
+        <div class="card-heading">
+          <p class="label">可以这样说</p>
+          <span class="card-number">03</span>
+        </div>
         <ul class="examples">
           <li>画一个紫色星形放在中央</li>
           <li>选中刚才两个图形，然后顶部对齐</li>

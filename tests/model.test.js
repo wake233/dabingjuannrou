@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DrawingEngine, validateActions } from "../static/model.js";
+import fs from "node:fs";
+import { DrawingEngine, validateActions, validateProject } from "../static/model.js";
 import { decomposeComposite, parseCommand } from "../static/parser.js";
 
 test("创建、命名、移动和一次撤销整个事务", () => {
@@ -98,9 +99,9 @@ test("删除组合成员会同步组合记录并在不足两项时解散", () =>
     { type: "group", target: "selected" }
   ]);
   const groupId = engine.state.objects[0].groupId;
-  const [firstId, secondId, thirdId] = engine.state.groups[groupId];
+  const [firstId, secondId, thirdId] = engine.state.groups[groupId].members;
   engine.execute([{ type: "delete", target: firstId }]);
-  assert.deepEqual(engine.state.groups[groupId], [secondId, thirdId]);
+  assert.deepEqual(engine.state.groups[groupId].members, [secondId, thirdId]);
   assert.ok(engine.state.objects.every(o => o.groupId === groupId));
   engine.execute([{ type: "delete", target: secondId }]);
   assert.deepEqual(engine.state.groups, {});
@@ -162,7 +163,7 @@ test("字段级校验接受完整标准动作接口", () => {
     { type: "status" }
   ]), true);
   assert.equal(validateActions([{ type: "history", operation: "undo" }]), true);
-  assert.equal(validateActions([{ type: "canvas", operation: "clear", requiresConfirmation: true }]), true);
+  assert.equal(validateActions([{ type: "canvas", operation: "clear" }]), true);
 });
 
 test("字段级校验拒绝非法载荷和清空确认绕过", () => {
@@ -179,7 +180,6 @@ test("字段级校验拒绝非法载荷和清空确认绕过", () => {
     { type: "align", target: "selected", mode: "diagonal" },
     { type: "distribute", target: "selected", axis: "depth" },
     { type: "history", operation: "clear" },
-    { type: "canvas", operation: "clear" },
     { type: "canvas", operation: "background", color: "red" },
     { type: "export", format: "pdf" },
     { type: "help", payload: "unexpected" }
@@ -243,4 +243,198 @@ test("组合指令失败时不修改画布状态", () => {
   assert.equal(engine.state.objects.length, 4, "应有原来的1个+房子的3个=4个");
   engine.execute([{ type: "history", operation: "undo" }]);
   assert.equal(JSON.stringify(engine.state), before, "撤销后应恢复原状态");
+});
+
+test("复合创建后的上下文作用于全部组件且普通创建不合并", () => {
+  for (const [command, expectedCount] of [
+    ["画一个房子，然后移动到右边", 3],
+    ["画一个雪人，然后复制它", 6],
+    ["画一排三个矩形，然后顶部对齐", 3]
+  ]) {
+    const engine = new DrawingEngine();
+    engine.execute(parseCommand(command));
+    assert.equal(engine.state.objects.length, expectedCount, command);
+    assert.equal(engine.undoStack.length, 1, command);
+    engine.undo();
+    assert.equal(engine.state.objects.length, 0, command);
+  }
+  const engine = new DrawingEngine();
+  engine.execute(parseCommand("画一个圆形，再画一个矩形"));
+  assert.equal(engine.state.lastCreated.length, 1);
+  assert.equal(engine.state.objects.find(o => o.id === engine.state.lastCreated[0]).kind, "rect");
+});
+
+test("复合创建后的布局操作保留整组选择反馈", () => {
+  const engine = new DrawingEngine();
+  const actions = parseCommand("画三个矩形，然后顶部对齐");
+  assert.equal(new Set(actions.slice(0, 3).map(action => action.y)).size, 3);
+  engine.execute(actions);
+
+  assert.equal(engine.state.objects.length, 3);
+  assert.equal(engine.state.selection.length, 3);
+  assert.deepEqual(
+    new Set(engine.state.selection),
+    new Set(engine.state.objects.map(object => object.id))
+  );
+  assert.equal(new Set(engine.state.objects.map(object => object.y)).size, 1);
+});
+
+test("批量创建与后续独立布局指令共享整组选择", () => {
+  for (const command of ["画三个矩形", "画一排三个矩形"]) {
+    const engine = new DrawingEngine();
+    engine.execute(parseCommand(command));
+
+    assert.equal(engine.state.selection.length, 3, command);
+    assert.doesNotThrow(() => engine.execute(parseCommand("顶部对齐", { selected: true })), command);
+    assert.equal(new Set(engine.state.objects.map(object => object.y)).size, 1, command);
+  }
+});
+
+test("浏览器动作元数据、零线宽与类型选择边界", () => {
+  assert.doesNotThrow(() => validateActions([{ type: "create", kind: "rect", _compositeId: 1 }]));
+  for (const value of [0, -1, 1.2, "1", null]) {
+    assert.throws(() => validateActions([{ type: "create", kind: "rect", _compositeId: value }]));
+  }
+  assert.throws(() => validateActions([{ type: "create", kind: "rect", _private: 1 }]));
+  const engine = new DrawingEngine();
+  engine.execute([{ type: "create", kind: "rect", strokeWidth: 0 }]);
+  assert.equal(engine.state.objects[0].strokeWidth, 0);
+
+  engine.execute([
+    { type: "create", kind: "circle" }, { type: "create", kind: "circle" },
+    { type: "create", kind: "circle" }, { type: "create", kind: "rect" }
+  ]);
+  engine.execute([{ type: "select", target: "圆形" }]);
+  assert.equal(engine.state.selection.length, 3);
+  const before = JSON.stringify(engine.state);
+  assert.throws(() => engine.execute([{ type: "select", target: "星形" }]));
+  assert.equal(JSON.stringify(engine.state), before);
+});
+
+test("组合名称是一等目标并由历史完整恢复", () => {
+  const engine = new DrawingEngine();
+  engine.execute([
+    { type: "create", kind: "rect" }, { type: "create", kind: "circle" },
+    { type: "select", target: "all" }, { type: "group", target: "selected" }
+  ]);
+  const group = engine.state.groups["group-1"];
+  assert.equal(group.name, "组合一");
+  engine.execute([{ type: "move", target: "组合一", dx: 25, dy: 0 }]);
+  assert.equal(engine.state.objects.every(o => o.x >= 25), true);
+  engine.undo();
+  assert.equal(engine.state.groups["group-1"].name, "组合一");
+  engine.redo();
+  assert.equal(engine.state.groups["group-1"].members.length, 2);
+});
+
+test("工程格式往返恢复完整状态并原子拒绝恶意载荷", () => {
+  const engine = new DrawingEngine();
+  engine.execute([
+    { type: "create", kind: "rect" }, { type: "create", kind: "circle" },
+    { type: "select", target: "all" }, { type: "group", target: "selected" },
+    { type: "canvas", operation: "background", color: "#111827" }
+  ]);
+  const project = engine.serializeProject();
+  const restored = new DrawingEngine();
+  restored.loadProject(project);
+  assert.deepEqual(restored.serializeProject(), project);
+  assert.equal(restored.undoStack.length, 1);
+
+  const before = JSON.stringify(restored.serializeProject());
+  for (const invalid of [
+    { ...project, version: 2 },
+    { ...project, state: { ...project.state, objects: [{ ...project.state.objects[0], onclick: "alert(1)" }] } },
+    { ...project, state: { ...project.state, selection: ["missing-id"] } },
+    { ...project, state: { ...project.state, counters: { rect: -1 } } },
+    { ...project, state: { ...project.state, groups: { ...project.state.groups, "group-2": { id: "group-2", name: "组合二", members: project.state.groups["group-1"].members } } } }
+  ]) {
+    assert.throws(() => restored.loadProject(invalid));
+    assert.equal(JSON.stringify(restored.serializeProject()), before);
+  }
+  assert.doesNotThrow(() => validateProject(project));
+});
+
+test("工程组合记录严格拒绝未知字段和非法 ID 且保持原子性", () => {
+  const engine = new DrawingEngine();
+  engine.execute([
+    { type: "create", kind: "rect" }, { type: "create", kind: "circle" },
+    { type: "select", target: "all" }, { type: "group", target: "selected" }
+  ]);
+  const project = engine.serializeProject();
+  const restored = new DrawingEngine();
+  restored.loadProject(project);
+  const before = JSON.stringify(restored.serializeProject());
+  const clone = value => JSON.parse(JSON.stringify(value));
+
+  const onclick = clone(project);
+  onclick.state.groups["group-1"].onclick = "alert(1)";
+  const url = clone(project);
+  url.state.groups["group-1"].url = "https://evil.example/payload";
+  const invalidGroupId = clone(project);
+  invalidGroupId.state.groups["https://evil.example/group"] = {
+    ...invalidGroupId.state.groups["group-1"],
+    id: "https://evil.example/group"
+  };
+  delete invalidGroupId.state.groups["group-1"];
+  invalidGroupId.state.objects.forEach(object => { object.groupId = "https://evil.example/group"; });
+  const longName = clone(project);
+  longName.state.groups["group-1"].name = "组".repeat(101);
+  const invalidShapeId = clone(project);
+  invalidShapeId.state.objects[0].id = "javascript:alert(1)";
+  invalidShapeId.state.groups["group-1"].members[0] = "javascript:alert(1)";
+  invalidShapeId.state.selection[0] = "javascript:alert(1)";
+  invalidShapeId.state.lastCreated[0] = "javascript:alert(1)";
+
+  for (const invalid of [onclick, url, invalidGroupId, longName, invalidShapeId]) {
+    assert.throws(() => restored.loadProject(invalid));
+    assert.equal(JSON.stringify(restored.serializeProject()), before);
+  }
+});
+
+test("工程加载严格拒绝冲突计数器和超长历史且保持原子性", () => {
+  const engine = new DrawingEngine();
+  engine.execute([
+    { type: "create", kind: "rect" }, { type: "create", kind: "rect" },
+    { type: "create", kind: "circle" }, { type: "select", target: "all" },
+    { type: "group", target: "selected" }
+  ]);
+  const project = engine.serializeProject();
+  const restored = new DrawingEngine();
+  restored.loadProject(project);
+  const before = JSON.stringify(restored.serializeProject());
+  const clone = value => JSON.parse(JSON.stringify(value));
+
+  const nextShapeConflict = clone(project);
+  nextShapeConflict.state.nextId = 3;
+  const nextGroupConflict = clone(project);
+  nextGroupConflict.state.nextGroupId = 1;
+  const lowKindCounter = clone(project);
+  lowKindCounter.state.counters.rect = 1;
+  const uncoveredGeneratedName = clone(project);
+  uncoveredGeneratedName.state.objects.find(object => object.kind === "rect").name = "矩形三";
+  uncoveredGeneratedName.state.counters.rect = 2;
+  const oversizedUndo = clone(project);
+  oversizedUndo.history.undo = Array.from({ length: 51 }, () => clone(project.state));
+  const oversizedRedo = clone(project);
+  oversizedRedo.history.redo = Array.from({ length: 51 }, () => clone(project.state));
+
+  for (const invalid of [
+    nextShapeConflict, nextGroupConflict, lowKindCounter, uncoveredGeneratedName, oversizedUndo, oversizedRedo
+  ]) {
+    assert.throws(() => restored.loadProject(invalid));
+    assert.equal(JSON.stringify(restored.serializeProject()), before);
+  }
+
+  const withDeletedGap = new DrawingEngine();
+  withDeletedGap.execute([
+    { type: "create", kind: "rect" }, { type: "create", kind: "rect" }, { type: "create", kind: "rect" }
+  ]);
+  withDeletedGap.execute([{ type: "delete", target: ["shape-2"] }]);
+  assert.doesNotThrow(() => validateProject(withDeletedGap.serializeProject()));
+});
+
+test("共享动作验证向量在浏览器侧按预期接受或拒绝", () => {
+  const vectors = JSON.parse(fs.readFileSync(new URL("./action_vectors.json", import.meta.url), "utf8"));
+  for (const actions of vectors.valid) assert.doesNotThrow(() => validateActions(actions));
+  for (const actions of vectors.invalid) assert.throws(() => validateActions(actions));
 });

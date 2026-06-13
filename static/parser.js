@@ -76,14 +76,24 @@ function chineseIndex(number) {
 export function chineseNumber(value) {
   if (value == null) return null;
   if (/^\d+(\.\d+)?$/.test(value)) return Number(value);
-  if (value === "十") return 10;
-  let total = 0, current = 0;
+  if (!/^[零一二两三四五六七八九十百千]+$/.test(value)) return null;
+  let total = 0, section = 0, current = 0, lastUnit = 1, zeroAfterUnit = false;
   for (const char of value) {
-    if (char in CN_DIGITS) current = CN_DIGITS[char];
-    else if (char === "十") { total += (current || 1) * 10; current = 0; }
-    else if (char === "百") { total += (current || 1) * 100; current = 0; }
+    if (char in CN_DIGITS) {
+      current = CN_DIGITS[char];
+      if (char === "零" && lastUnit > 1) zeroAfterUnit = true;
+    }
+    else {
+      const unit = { 十: 10, 百: 100, 千: 1000 }[char];
+      section += (current || 1) * unit;
+      current = 0;
+      lastUnit = unit;
+      zeroAfterUnit = false;
+    }
   }
-  return total + current || null;
+  if (current && lastUnit >= 100 && !zeroAfterUnit) current *= lastUnit / 10;
+  total += section + current;
+  return total || null;
 }
 
 export function normalizeText(text) {
@@ -164,59 +174,57 @@ export function decomposeComposite(text) {
     ];
   }
 
-  const rowPattern = /^画一排([零一二两三四五六七八九十百\d]+)个(.+)$/;
+  const rowPattern = /^画一排([零一二两三四五六七八九十百千\d]+)个(.+)$/;
   const rowMatch = normalized.match(rowPattern);
   if (rowMatch) {
     const count = chineseNumber(rowMatch[1]);
     const kind = shapeKindFromText(rowMatch[2]);
-    if (kind && count >= 1 && count <= 20) {
-      const size = SHAPE_DEFAULTS[kind];
-      const spacing = size.width * 1.5;
-      const totalW = count * size.width + (count - 1) * spacing;
-      const startX = 500 - totalW / 2;
-      const centerY = 350 - size.height / 2;
-      const actions = [];
-      for (let i = 0; i < count; i++) {
-        actions.push({
-          type: "create",
-          kind,
-          x: startX + i * (size.width + spacing),
-          y: centerY,
-          width: size.width,
-          height: size.height
-        });
-      }
-      return actions;
-    }
+    if (kind && count >= 1 && count <= 20) return arrangeComposite(kind, count, "horizontal");
+    if (kind && count > 20) throw new Error("复合动作数量不能超过 20");
   }
 
-  const colPattern = /^画一列([零一二两三四五六七八九十百\d]+)个(.+)$/;
+  const colPattern = /^画一列([零一二两三四五六七八九十百千\d]+)个(.+)$/;
   const colMatch = normalized.match(colPattern);
   if (colMatch) {
     const count = chineseNumber(colMatch[1]);
     const kind = shapeKindFromText(colMatch[2]);
-    if (kind && count >= 1 && count <= 20) {
-      const size = SHAPE_DEFAULTS[kind];
-      const spacing = size.height * 1.5;
-      const totalH = count * size.height + (count - 1) * spacing;
-      const startY = 350 - totalH / 2;
-      const centerX = 500 - size.width / 2;
-      const actions = [];
-      for (let i = 0; i < count; i++) {
-        actions.push({
-          type: "create",
-          kind,
-          x: centerX,
-          y: startY + i * (size.height + spacing),
-          width: size.width,
-          height: size.height
-        });
-      }
-      return actions;
-    }
+    if (kind && count >= 1 && count <= 20) return arrangeComposite(kind, count, "vertical");
+    if (kind && count > 20) throw new Error("复合动作数量不能超过 20");
+  }
+
+  const manyPattern = /^画([零一二两三四五六七八九十百千\d]+)个(.+)$/;
+  const manyMatch = normalized.match(manyPattern);
+  if (manyMatch) {
+    const count = chineseNumber(manyMatch[1]);
+    const kind = shapeKindFromText(manyMatch[2]);
+    if (kind && count >= 2 && count <= 20) return arrangeComposite(kind, count, "horizontal")
+      .map((action, index) => ({ ...action, y: action.y + ((index % 3) - 1) * 60 }));
+    if (kind && count > 20) throw new Error("复合动作数量不能超过 20");
   }
 
   return null;
+}
+
+function arrangeComposite(kind, count, axis) {
+  const margin = 20;
+  const available = axis === "horizontal" ? 1000 - margin * 2 : 700 - margin * 2;
+  const original = SHAPE_DEFAULTS[kind];
+  const primary = axis === "horizontal" ? original.width : Math.max(original.height, 1);
+  const maxGap = Math.min(30, primary * .25);
+  const gap = count > 1 ? Math.max(0, Math.min(maxGap, (available - primary * count) / (count - 1))) : 0;
+  const scale = Math.min(1, available / (primary * count + gap * (count - 1)));
+  const width = original.width * scale;
+  const height = original.height * scale;
+  const adjustedPrimary = axis === "horizontal" ? width : Math.max(height, 1);
+  const adjustedGap = count > 1 ? Math.max(0, (available - adjustedPrimary * count) / (count - 1)) : 0;
+  const total = adjustedPrimary * count + adjustedGap * (count - 1);
+  const start = margin + (available - total) / 2;
+  return Array.from({ length: count }, (_, index) => ({
+    type: "create", kind,
+    x: axis === "horizontal" ? start + index * (width + adjustedGap) : (1000 - width) / 2,
+    y: axis === "vertical" ? start + index * (Math.max(height, 1) + adjustedGap) : (700 - height) / 2,
+    width, height
+  }));
 }
 
 function colorFrom(text) {
@@ -241,13 +249,25 @@ function numberAfter(text, words) {
 
 function targetFrom(text, context) {
   if (/刚才两个|上两个|最近两个/.test(text)) return "lastTwo";
-  if (/所有|全部/.test(text)) return "all";
+  if (/所有|全部/.test(text)) {
+    const typeName = KINDS_SORTED.find(([name]) => text.includes(name))?.[0];
+    if (typeName && !/所有图形|全部图形/.test(text)) return TYPE_TARGET_NAMES[shapeKindFromText(typeName)];
+    return "all";
+  }
   if (/这些图形|它们|整体/.test(text)) return "selected";
+  if (/它|这个/.test(text) && context.composite) return "last";
   if (/它|这个|选中/.test(text)) return "selected";
-  const named = text.match(/(矩形|圆形|椭圆|三角形|星形|直线|箭头|文字)([一二两三四五六七八九十\d]+)/);
+  const group = text.match(/组合([一二两三四五六七八九十百千\d]+)/);
+  if (group) return `组合${chineseIndex(chineseNumber(group[1]))}`;
+  const named = text.match(/(矩形|圆形|椭圆|三角形|星形|直线|箭头|文字)([一二两三四五六七八九十百千\d]+)/);
   if (named) return `${named[1]}${chineseIndex(chineseNumber(named[2]))}`;
   return context.selected ? "selected" : "last";
 }
+
+const TYPE_TARGET_NAMES = {
+  rect: "矩形", circle: "圆形", ellipse: "椭圆", triangle: "三角形",
+  star: "星形", line: "直线", arrow: "箭头", text: "文字"
+};
 
 function parseClause(clause, context) {
   if (/^(撤销|返回上一步)$/.test(clause)) return [{ type: "history", operation: "undo" }];
@@ -255,7 +275,7 @@ function parseClause(clause, context) {
   if (/^(帮助|有什么指令|怎么使用)/.test(clause)) return [{ type: "help" }];
   if (/^(当前状态|画布状态|有什么图形)/.test(clause)) return [{ type: "status" }];
   if (/取消选择/.test(clause)) return [{ type: "select", target: "none" }];
-  if (/清空画布|清除画布|全部清空/.test(clause)) return [{ type: "canvas", operation: "clear", requiresConfirmation: true }];
+  if (/清空画布|清除画布|全部清空/.test(clause)) return [{ type: "canvas", operation: "clear" }];
   if (/背景/.test(clause) && colorFrom(clause)) return [{ type: "canvas", operation: "background", color: colorFrom(clause) }];
   if (/保存|导出|下载/.test(clause)) {
     return [{ type: "export", format: /svg/i.test(clause) ? "svg" : "png" }];
@@ -338,7 +358,7 @@ function parseClause(clause, context) {
 }
 
 export function parseCommand(text, initialContext = {}) {
-  const context = { selected: Boolean(initialContext.selected) };
+  const context = { selected: Boolean(initialContext.selected), composite: false };
   const corrected = fuzzyCorrect(text);
   const normalized = normalizeText(corrected);
   // Split into clauses, then try decomposeComposite on EACH clause.
@@ -351,13 +371,15 @@ export function parseCommand(text, initialContext = {}) {
     const composite = decomposeComposite(clause.trim());
     if (composite) {
       // Mark composite-generated actions with a shared _compositeId so
-      // needsRiskConfirmation can treat each composite group as one
-      // semantic unit, preventing false confirmation triggers for
+      // each composite group is treated as one semantic unit for
       // single-intent commands like "画一个房子".
       const gid = ++compositeSeq;
+      context.composite = true;
       return composite.map(action => ({ ...action, _compositeId: gid }));
     }
-    return parseClause(clause.trim(), context);
+    const parsed = parseClause(clause.trim(), context);
+    context.composite = false;
+    return parsed;
   });
   validateActions(actions);
   return actions;
