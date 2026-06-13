@@ -136,7 +136,10 @@ function tryPreviewRender(text) {
   if (text !== lastPreviewText && lenDiff < 2) return;
 
   try {
-    const actions = parseCommand(text, { selected: engine.state.selection.length > 0 });
+    const actions = parseCommand(text, {
+      selected: engine.state.selection.length > 0,
+      entityNames: engine.state.objects.filter(object => object.kind === "entity").map(object => object.name)
+    });
     // Clone engine state and apply actions to the clone
     const cloneState = JSON.parse(JSON.stringify(engine.state));
     const clone = new DrawingEngine(cloneState);
@@ -318,7 +321,10 @@ export async function handleCommand(rawText, confidence = 1, metrics = {}) {
     return;
   }
   let actions;
-  try { actions = parseCommand(rawText, { selected: engine.state.selection.length > 0 }); }
+  try { actions = parseCommand(rawText, {
+    selected: engine.state.selection.length > 0,
+    entityNames: engine.state.objects.filter(object => object.kind === "entity").map(object => object.name)
+  }); }
   catch (parseError) {
     console.log("[handleCommand] 本地解析失败:", parseError.message);
     // A clear locally parsed command is safe to execute regardless of an

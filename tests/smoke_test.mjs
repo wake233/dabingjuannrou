@@ -134,6 +134,14 @@ check("版本 2 工程保留场景和实体", () => {
   if (project.version !== 2 || restored.state.objects[0].params.direction !== "left") throw new Error("工程恢复失败");
 });
 
+check("本地常见场景构图器生成丰富雨中女人画面", () => {
+  const engine = new model.DrawingEngine();
+  engine.execute(parser.parseCommand("画一个下雨天打伞的女人"));
+  if (engine.state.objects.length < 8) throw new Error("场景实体数量不足");
+  if (engine.state.objects.find(object => object.name === "人物")?.params.variant !== "woman") throw new Error("未生成女性人物");
+  if (!engine.state.objects.some(object => object.templateId === "puddle")) throw new Error("缺少环境叙事元素");
+});
+
 // ── Results ──
 console.log(`\n${'='.repeat(40)}`);
 console.log(`通过: ${passed}  失败: ${failed}  总计: ${passed + failed}`);

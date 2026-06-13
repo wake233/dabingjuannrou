@@ -8,10 +8,14 @@ ALLOWED_ACTIONS = {
     "entity_create", "entity_update", "scene_update",
 }
 ENTITY_TEMPLATES = {
-    "person": {"color", "accent", "pose", "direction"},
+    "person": {"color", "accent", "pose", "direction", "variant"},
     "cat": {"color", "accent", "pose", "direction"},
+    "dog": {"color", "accent", "pose", "direction"},
+    "bird": {"color", "accent", "direction", "count"},
     "umbrella": {"color", "accent", "direction"},
     "streetlamp": {"color", "accent"}, "roof": {"color", "accent"},
+    "house": {"color", "accent"}, "bridge": {"color", "accent"}, "boat": {"color", "accent", "direction"},
+    "bench": {"color", "accent"}, "bicycle": {"color", "accent", "direction"}, "fence": {"color", "accent", "density"},
     "buildings": {"color", "accent", "density"}, "rain": {"color", "density", "direction"},
     "cloud": {"color", "density"}, "sun": {"color", "accent"}, "moon": {"color", "accent"},
     "stars": {"color", "density", "count"}, "tree": {"color", "accent", "density"},
@@ -159,6 +163,8 @@ def validate_entity_params(template_id, params):
             raise ValueError("实体姿态参数无效")
         elif field == "direction" and not allowed_value(value, {"left", "right", "vertical", "diagonal"}):
             raise ValueError("实体方向参数无效")
+        elif field == "variant" and not allowed_value(value, {"woman", "man", "child", "neutral"}):
+            raise ValueError("人物类型参数无效")
         elif field == "count" and (not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 100):
             raise ValueError("实体数量参数无效")
         elif field == "density" and not finite_number(value, 0, 1):

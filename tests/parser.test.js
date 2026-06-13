@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chineseNumber, decomposeComposite, normalizeText, parseCommand, splitCommands } from "../static/parser.js";
+import { chineseNumber, composeCommonScene, decomposeComposite, normalizeText, parseCommand, splitCommands } from "../static/parser.js";
 
 test("中文数字与常见识别文本归一化", () => {
   assert.equal(chineseNumber("五十"), 50);
@@ -404,4 +404,32 @@ test("常见语义实体修改由本地规则确定性解析", () => {
   }]);
   assert.deepEqual(parseCommand("删除那只猫"), [{ type: "delete", target: "猫" }]);
   assert.equal(parseCommand("保存项目")[0].format, "project");
+});
+
+test("扩展常见场景实体可被后续语音修改", () => {
+  assert.deepEqual(parseCommand("把自行车改成红色"), [{
+    type: "entity_update", target: "自行车", changes: { params: { color: "#ef4444" } }
+  }]);
+  assert.deepEqual(parseCommand("删除小狗"), [{ type: "delete", target: "狗" }]);
+  assert.deepEqual(parseCommand("小船往右一点"), [{ type: "move", target: "船", dx: 50, dy: 0 }]);
+});
+
+test("常见丰富场景由本地构图器稳定生成完整分层画面", () => {
+  const rainyWoman = parseCommand("画一个下雨天打伞的女人");
+  assert.equal(rainyWoman[0].type, "scene_update");
+  assert.ok(rainyWoman.length >= 8);
+  assert.deepEqual(
+    new Set(rainyWoman.slice(1).map(action => action.templateId)),
+    new Set(["cloud", "buildings", "street", "puddle", "streetlamp", "person", "umbrella", "rain"])
+  );
+  assert.equal(rainyWoman.find(action => action.templateId === "person").params.variant, "woman");
+
+  for (const text of ["画一个午后公园", "画一个有桥和小船的河岸", "画一个月夜小镇", "画一条安静街道", "画一个春日山野"]) {
+    const actions = composeCommonScene(text);
+    assert.ok(actions.length >= 8, text);
+    assert.equal(actions[0].type, "scene_update", text);
+    assert.ok(new Set(actions.slice(1).map(action => action.templateId)).size >= 7, text);
+  }
+  const appended = parseCommand("画一个下雨天打伞的女人", { entityNames: rainyWoman.slice(1).map(action => action.name) });
+  assert.ok(appended.slice(1).every(action => !rainyWoman.slice(1).some(existing => existing.name === action.name)));
 });

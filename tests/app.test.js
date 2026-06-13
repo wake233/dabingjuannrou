@@ -646,6 +646,20 @@ test("未知本地指令回退模型并携带画布上下文", async () => {
   assert.deepEqual(app.engine.state.objects.map(object => object.kind), ["circle", "star"]);
 });
 
+test("高频丰富场景在模型不可用时仍由本地构图器生成", async () => {
+  resetApp();
+  globalThis.fetch = async () => { throw new Error("不应请求模型"); };
+  await app.handleCommand("画一个下雨天打伞的女人");
+  assert.equal(app.engine.state.scene.summary, "雨中打伞的女人");
+  assert.equal(app.engine.undoStack.length, 1);
+  assert.ok(app.engine.state.objects.length >= 8);
+  assert.equal(app.engine.state.objects.find(object => object.templateId === "person").params.variant, "woman");
+  assert.ok(browser.elements["drawing-layer"].children.every(element => element.getAttribute("data-art-style") === "storybook-layered"));
+  await app.handleCommand("画一个下雨天打伞的女人");
+  assert.equal(app.engine.state.objects.length, 16);
+  assert.equal(new Set(app.engine.state.objects.map(object => object.name)).size, 16);
+});
+
 test("语义实体由可信模板整体渲染并进入 SVG 导出", () => {
   resetApp();
   app.engine.execute([

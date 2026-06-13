@@ -14,7 +14,10 @@ const KINDS = {
 const POSITIONS = ["左上角", "右上角", "左下角", "右下角", "中央", "中间", "左边", "右边", "上边", "下边"];
 const ENTITY_ALIASES = {
   人物: "人物", 女人: "人物", 男人: "人物", 女孩: "人物", 男孩: "人物",
-  猫: "猫", 小猫: "猫", 伞: "伞", 雨伞: "伞", 路灯: "路灯", 屋顶: "屋顶",
+  猫: "猫", 小猫: "猫", 狗: "狗", 小狗: "狗", 鸟: "鸟", 小鸟: "鸟",
+  伞: "伞", 雨伞: "伞", 路灯: "路灯", 屋顶: "屋顶", 房屋: "房屋", 房子: "房屋",
+  桥: "桥", 小桥: "桥", 船: "船", 小船: "船", 长椅: "长椅", 椅子: "长椅",
+  自行车: "自行车", 单车: "自行车", 栅栏: "栅栏", 篱笆: "栅栏",
   建筑剪影: "建筑剪影", 建筑: "建筑剪影", 雨: "雨", 云: "云", 太阳: "太阳",
   月亮: "月亮", 星空: "星空", 树: "树", 山: "山", 花丛: "花丛", 河流: "河流",
   草地: "草地", 街道: "街道", 水洼: "水洼"
@@ -372,10 +375,108 @@ function parseClause(clause, context) {
   throw new Error(`无法理解“${clause}”`);
 }
 
+function entity(templateId, name, x, y, width, height, layer, params = {}) {
+  return { type: "entity_create", templateId, name, x, y, width, height, layer, params };
+}
+
+export function composeCommonScene(text, existingNames = []) {
+  if (!/画|创建|生成|来一/.test(text)) return null;
+  const scene = (theme, mood, composition, summary, entities) => {
+    const used = new Set(existingNames);
+    const named = entities.map(action => {
+      const base = action.name;
+      let name = base;
+      let index = 2;
+      while (used.has(name)) name = `${base}${index++}`;
+      used.add(name);
+      return { ...action, name };
+    });
+    return [{ type: "scene_update", changes: { theme, mood, composition, summary, ignored: [] } }, ...named];
+  };
+  if (/雨|下雨/.test(text) && /伞/.test(text) && /女人|女孩|人物|人/.test(text)) {
+    return scene("雨日街角", "安静温暖", "暖色雨伞与人物为焦点，冷色街景、水洼和斜雨形成前中后景", "雨中打伞的女人", [
+      entity("cloud", "云", 40, 15, 920, 180, -8, { color: "#9aafbd" }),
+      entity("buildings", "建筑剪影", 0, 170, 1000, 330, -7, { color: "#68788a", accent: "#e8c47c" }),
+      entity("street", "街道", 0, 455, 1000, 245, -5, { color: "#667582", accent: "#d2b48c" }),
+      entity("puddle", "水洼", 90, 535, 320, 110, -3, { color: "#779bb3" }),
+      entity("streetlamp", "路灯", 735, 170, 145, 410, -2, { accent: "#f1cf86" }),
+      entity("person", "人物", 390, 265, 190, 390, 2, { variant: "woman", pose: "walking", direction: "right", color: "#68788a", accent: "#c97b84" }),
+      entity("umbrella", "伞", 315, 145, 330, 275, 3, { color: "#c97b84", accent: "#e8c47c" }),
+      entity("rain", "雨", 0, 0, 1000, 700, 9, { density: .82, direction: "diagonal", color: "#88a9bd" })
+    ]);
+  }
+  if (/公园|花园/.test(text)) {
+    return scene("午后公园", "轻快悠闲", "长椅为中景焦点，树木围合，花草和小动物丰富前景", "有生活气息的公园", [
+      entity("grass", "草地", 0, 320, 1000, 380, -8, { color: "#91ad82" }),
+      entity("sun", "太阳", 760, 45, 140, 140, -7, { color: "#e8c47c" }),
+      entity("tree", "树一", 35, 120, 250, 480, -4, { color: "#7f9e78", accent: "#9b755b" }),
+      entity("tree", "树二", 760, 160, 210, 420, -4, { color: "#86a886", accent: "#9b755b" }),
+      entity("bench", "长椅", 360, 390, 300, 210, 0, { color: "#a87858" }),
+      entity("flowers", "花丛", 80, 530, 300, 150, 2, { count: 14, color: "#c97b84", accent: "#e8c47c" }),
+      entity("dog", "狗", 660, 480, 170, 150, 3, { color: "#b58a62", pose: "walking" }),
+      entity("bird", "鸟", 300, 70, 350, 170, 4, { count: 5, color: "#596780" })
+    ]);
+  }
+  if (/河岸|河边|小桥|桥/.test(text)) {
+    return scene("春日河岸", "清新宁静", "河流形成视觉动线，小桥连接两岸，船与飞鸟形成叙事焦点", "有桥和小船的河岸", [
+      entity("mountain", "远山", 0, 80, 1000, 430, -9, { color: "#9aad9e" }),
+      entity("grass", "草地", 0, 360, 1000, 340, -7, { color: "#91ad82" }),
+      entity("river", "河流", 0, 400, 1000, 300, -4, { color: "#7fa9bd" }),
+      entity("bridge", "桥", 265, 310, 470, 260, -1, { color: "#a87858", accent: "#d6b27c" }),
+      entity("boat", "船", 610, 500, 250, 150, 1, { color: "#b8785f", accent: "#f1dfb5" }),
+      entity("tree", "河岸树", 40, 225, 230, 420, 2, { color: "#7f9e78", accent: "#9b755b" }),
+      entity("flowers", "花丛", 720, 555, 260, 130, 3, { count: 12, color: "#c97b84" }),
+      entity("bird", "飞鸟", 560, 80, 320, 160, 4, { count: 4, color: "#596780" })
+    ]);
+  }
+  if (/月夜|夜晚|夜景|星空/.test(text)) {
+    return scene("月夜小镇", "宁静梦幻", "月亮与屋顶形成对角构图，窗光和星空提供冷暖对比", "安静的月夜小镇", [
+      entity("stars", "星空", 0, 0, 1000, 430, -10, { density: .75, color: "#e8c47c" }),
+      entity("moon", "月亮", 745, 55, 155, 155, -8, { color: "#e8c47c" }),
+      entity("cloud", "云", 80, 85, 370, 145, -7, { color: "#70839a" }),
+      entity("buildings", "建筑剪影", 0, 270, 1000, 430, -5, { color: "#596780", accent: "#e8c47c" }),
+      entity("roof", "屋顶", 230, 360, 540, 300, -1, { color: "#48566b", accent: "#8f6f64" }),
+      entity("cat", "猫", 470, 400, 165, 135, 2, { color: "#c6a57a", pose: "sitting" }),
+      entity("streetlamp", "路灯", 75, 310, 130, 360, 3, { accent: "#e8c47c" })
+    ]);
+  }
+  if (/街景|街道|小镇|巷子/.test(text)) {
+    return scene("温暖街景", "悠闲明亮", "房屋围合街道，自行车和长椅提供生活叙事", "有生活气息的街道", [
+      entity("buildings", "建筑剪影", 0, 130, 1000, 390, -9, { color: "#82909b", accent: "#e8c47c" }),
+      entity("street", "街道", 0, 430, 1000, 270, -7, { color: "#9a9185", accent: "#e8c47c" }),
+      entity("house", "房屋一", 80, 230, 260, 360, -3, { color: "#b67868", accent: "#d8b694" }),
+      entity("house", "房屋二", 680, 210, 250, 380, -3, { color: "#72879a", accent: "#d7c19d" }),
+      entity("streetlamp", "路灯", 455, 230, 130, 370, 0, { accent: "#e8c47c" }),
+      entity("bench", "长椅", 590, 480, 250, 170, 2, { color: "#a87858" }),
+      entity("bicycle", "自行车", 260, 465, 280, 180, 3, { color: "#c97b84" }),
+      entity("bird", "鸟", 380, 80, 300, 150, 4, { count: 4, color: "#596780" })
+    ]);
+  }
+  if (/春日|山野|田野|山间/.test(text)) {
+    return scene("春日山野", "明亮舒展", "远山、河流和花草构成纵深，太阳与小屋形成视觉平衡", "春日山野风景", [
+      entity("sun", "太阳", 760, 50, 150, 150, -10, { color: "#e8c47c" }),
+      entity("mountain", "远山", 0, 100, 1000, 430, -9, { color: "#91a69c" }),
+      entity("grass", "草地", 0, 340, 1000, 360, -7, { color: "#91ad82" }),
+      entity("river", "河流", 250, 410, 750, 290, -4, { color: "#7fa9bd" }),
+      entity("house", "小屋", 80, 300, 250, 330, -1, { color: "#a96f62", accent: "#d8b694" }),
+      entity("tree", "树", 690, 250, 250, 420, 1, { color: "#7f9e78", accent: "#9b755b" }),
+      entity("fence", "栅栏", 320, 485, 360, 145, 2, { color: "#c7a878" }),
+      entity("flowers", "花丛", 20, 545, 420, 145, 3, { count: 18, color: "#c97b84", accent: "#e8c47c" }),
+      entity("bird", "飞鸟", 420, 90, 300, 160, 4, { count: 5, color: "#596780" })
+    ]);
+  }
+  return null;
+}
+
 export function parseCommand(text, initialContext = {}) {
   const context = { selected: Boolean(initialContext.selected), composite: false };
   const corrected = fuzzyCorrect(text);
   const normalized = normalizeText(corrected);
+  const commonScene = composeCommonScene(normalized, initialContext.entityNames || []);
+  if (commonScene) {
+    validateActions(commonScene);
+    return commonScene;
+  }
   // Split into clauses, then try decomposeComposite on EACH clause.
   // This fixes DESIGN.md §4.2 / §7.8: composite commands like "画一个房子"
   // could not previously be mixed with other clauses ("然后移动到右边").

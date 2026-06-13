@@ -405,6 +405,19 @@ class ServerTests(unittest.TestCase):
             with self.subTest(result=result), self.assertRaises(ValueError):
                 validate_interpretation(result)
 
+    def test_person_variant_is_controlled_and_prompt_requests_rich_composition(self):
+        result = {
+            "kind": "scene_plan",
+            "scene": {"theme": "雨天", "mood": "安静", "composition": "分层构图", "summary": "雨中女人", "ignored": []},
+            "entities": [{"templateId": "person", "name": "女人", "x": 300, "y": 220, "width": 180, "height": 380, "params": {"variant": "woman"}}],
+        }
+        self.assertEqual(validate_interpretation(result), result)
+        result["entities"][0]["params"]["variant"] = "robot"
+        with self.assertRaises(ValueError):
+            validate_interpretation(result)
+        self.assertIn("不是图标堆叠", SYSTEM_PROMPT)
+        self.assertIn("5 至 10 个实体", SYSTEM_PROMPT)
+
     def test_interpret_endpoint_returns_validated_union_result(self):
         handler = object.__new__(AppHandler)
         handler.path = "/api/interpret"
