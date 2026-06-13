@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from server.config import STATIC
 from server.schema import MAX_AUDIO_BYTES
-from server.client import transcribe_audio, parse_with_llm
+from server.client import ServiceError, transcribe_audio, parse_with_llm
 
 
 class AppHandler(SimpleHTTPRequestHandler):
@@ -55,8 +55,18 @@ class AppHandler(SimpleHTTPRequestHandler):
                 raise ValueError("上下文无效")
             actions = parse_with_llm(text, context)
             self.send_json(200, {"actions": actions})
+        except ServiceError as exc:
+            self.send_json(exc.status, {
+                "error": str(exc),
+                "errorCode": exc.error_code,
+                "retryable": exc.retryable,
+            })
         except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
-            self.send_json(400, {"error": str(exc)})
+            self.send_json(400, {
+                "error": str(exc),
+                "errorCode": "invalid_request",
+                "retryable": False,
+            })
 
     def send_json(self, status, body):
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")

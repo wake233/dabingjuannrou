@@ -445,15 +445,76 @@ test("云端转写成功后执行绘图指令", async () => {
 });
 
 test("云端转写失败后提供重试和停止操作", async () => {
-  globalThis.fetch = async () => ({ ok: false, json: async () => ({ error: "云端语音识别未配置" }) });
+  globalThis.fetch = async () => ({ ok: false, json: async () => ({ error: "请求过多", errorCode: "rate_limited", retryable: true }) });
 
   await app.transcribeAudio(new Blob(["audio"], { type: "audio/webm" }));
 
   assert.equal(browser.elements["voice-status"].textContent, "云端识别不可用，请重试或停止");
+  assert.match(browser.elements.feedback.textContent, /云端请求过多或额度不足/);
   assert.equal(browser.elements["fallback-panel"].hidden, false);
   assert.equal(typeof browser.elements["retry-cloud"].onclick, "function");
   browser.elements["fallback-stop"].click();
   assert.equal(browser.elements["voice-status"].textContent, "已暂停");
+});
+
+test("验收指标事件按提交、转写、命令完成顺序发布且不包含音频", async () => {
+  resetApp();
+  const events = [];
+  const originalDispatch = globalThis.dispatchEvent;
+  const OriginalCustomEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class { constructor(_name, options) { this.detail = options.detail; } };
+  globalThis.dispatchEvent = event => events.push(event.detail);
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ text: "画一个圆形" }) });
+
+  const segmentSubmittedAt = performance.now();
+  globalThis.dispatchEvent(new CustomEvent("listen-paint-acceptance", { detail: { type: "segment-submitted", segmentId: 7 } }));
+  await app.transcribeAudio(new Blob(["audio"], { type: "audio/webm" }), { segmentId: 7, segmentSubmittedAt });
+
+  assert.deepEqual(events.map(event => event.type), ["segment-submitted", "transcription-completed", "command-completed"]);
+  assert.equal(events[1].transcript, "画一个圆形");
+  assert.equal(events[2].success, true);
+  assert.ok(events.every(event => !("audio" in event) && !("blob" in event)));
+  globalThis.dispatchEvent = originalDispatch;
+  globalThis.CustomEvent = OriginalCustomEvent;
+});
+
+test("浏览器能力错误使用统一分类提示", async () => {
+  const events = [];
+  const originalDispatch = globalThis.dispatchEvent;
+  const OriginalCustomEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class { constructor(_name, options) { this.detail = options.detail; } };
+  globalThis.dispatchEvent = event => events.push(event.detail);
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: {} } });
+  delete window.MediaRecorder;
+  app._resetCloudConfig();
+  app.testEnterFullListening();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(events.at(-1).errorCode, "browser_unsupported");
+  assert.match(browser.elements.feedback.textContent, /浏览器不支持云端录音/);
+  globalThis.dispatchEvent = originalDispatch;
+  globalThis.CustomEvent = OriginalCustomEvent;
+});
+
+test("麦克风权限拒绝使用统一分类提示", async () => {
+  const events = [];
+  const originalDispatch = globalThis.dispatchEvent;
+  const OriginalCustomEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class { constructor(_name, options) { this.detail = options.detail; } };
+  globalThis.dispatchEvent = event => events.push(event.detail);
+  const denied = new Error("denied");
+  denied.name = "NotAllowedError";
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { mediaDevices: { getUserMedia: async () => { throw denied; } } }
+  });
+  window.MediaRecorder = class {};
+  window.AudioContext = class {};
+  app.testEnterFullListening();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(events.at(-1).errorCode, "microphone_permission");
+  assert.match(browser.elements.feedback.textContent, /麦克风权限被拒绝/);
+  globalThis.dispatchEvent = originalDispatch;
+  globalThis.CustomEvent = OriginalCustomEvent;
 });
 
 test("重试云端识别会重新检查配置并恢复录音", async () => {

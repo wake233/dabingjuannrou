@@ -4,14 +4,14 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 import server.config
 import server.client
 from server.config import CONFIG, load_env_file, load_config_file
 from server.schema import MAX_AUDIO_BYTES, validate_actions
 from server.client import (
-    parse_json_content, parse_with_llm, transcribe_audio, service_status,
+    ServiceError, parse_json_content, parse_with_llm, transcribe_audio, service_status,
 )
 from server.handler import AppHandler
 from server.server import ExclusiveThreadingHTTPServer
@@ -116,6 +116,15 @@ class ServerTests(unittest.TestCase):
             actions = parse_with_llm("画圆", {})
         self.assertEqual(actions[0]["kind"], "circle")
 
+    def test_invalid_model_response_is_classified(self):
+        response = Response({"choices": [{"message": {"content": "not-json"}}]})
+        config = {"speech_to_text": {"base_url": "", "model": ""}, "command_model": {"base_url": "https://example.test/v1", "model": "model"}}
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "key"}, clear=True), patch.object(server.client, "CONFIG", config), patch("server.client.urlopen", return_value=response):
+            with self.assertRaises(ServiceError) as caught:
+                parse_with_llm("画圆", {})
+        self.assertEqual(caught.exception.error_code, "invalid_response")
+        self.assertFalse(caught.exception.retryable)
+
     def test_shared_openai_key_is_used_by_both_services(self):
         model_response = Response({"choices": [{"message": {"content": '[{"type":"create","kind":"circle"}]'}}]})
         speech_response = Response({"text": "画一个圆形"})
@@ -185,6 +194,8 @@ class ServerTests(unittest.TestCase):
                 handler.do_POST()
                 self.assertEqual(handler.rfile.read.call_count, 0)
                 self.assertEqual(handler.send_json.call_args.args[0], 400)
+                self.assertEqual(handler.send_json.call_args.args[1]["errorCode"], "invalid_request")
+                self.assertFalse(handler.send_json.call_args.args[1]["retryable"])
                 handler.rfile.reset_mock()
                 handler.send_json.reset_mock()
 
@@ -250,7 +261,7 @@ class ServerTests(unittest.TestCase):
     def test_transcription_invalid_response_and_timeout(self):
         config = {"speech_to_text": {"base_url": "https://example.test/v1", "model": "stt-model"}, "command_model": {"base_url": "", "model": ""}}
         with patch.dict(os.environ, {"OPENAI_API_KEY": "key"}, clear=True), patch.object(server.client, "CONFIG", config), patch("server.client.urlopen", return_value=Response({"value": "missing"})):
-            with self.assertRaisesRegex(ValueError, "响应无效"):
+            with self.assertRaisesRegex(ServiceError, "响应无效"):
                 transcribe_audio(b"audio", "audio/webm")
         with patch.dict(os.environ, {"OPENAI_API_KEY": "key"}, clear=True), patch.object(server.client, "CONFIG", config), patch("server.client.urlopen", side_effect=TimeoutError):
             with self.assertRaisesRegex(RuntimeError, "连接超时"):
@@ -262,6 +273,50 @@ class ServerTests(unittest.TestCase):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "invalid"}, clear=True), patch.object(server.client, "CONFIG", config), patch("server.client.urlopen", side_effect=error):
             with self.assertRaisesRegex(RuntimeError, "密钥无效"):
                 transcribe_audio(b"audio", "audio/webm")
+
+    def test_cloud_error_classification_and_retryability(self):
+        config = {"speech_to_text": {"base_url": "https://example.test/v1", "model": "stt-model"}, "command_model": {"base_url": "", "model": ""}}
+        cases = [
+            (HTTPError("https://example.test", 401, "Unauthorized", {}, None), "authentication_failed", False),
+            (HTTPError("https://example.test", 403, "Forbidden", {}, None), "permission_denied", False),
+            (HTTPError("https://example.test", 404, "Missing", {}, None), "model_not_found", False),
+            (HTTPError("https://example.test", 429, "Limited", {}, None), "rate_limited", True),
+            (URLError("offline"), "network_failure", True),
+            (TimeoutError(), "timeout", True),
+        ]
+        for raised, code, retryable in cases:
+            with self.subTest(code=code), patch.dict(os.environ, {"OPENAI_API_KEY": "key"}, clear=True), patch.object(server.client, "CONFIG", config), patch("server.client.urlopen", side_effect=raised):
+                with self.assertRaises(ServiceError) as caught:
+                    transcribe_audio(b"audio", "audio/webm")
+                self.assertEqual(caught.exception.error_code, code)
+                self.assertEqual(caught.exception.retryable, retryable)
+
+    def test_invalid_and_empty_transcription_are_classified(self):
+        config = {"speech_to_text": {"base_url": "https://example.test/v1", "model": "stt-model"}, "command_model": {"base_url": "", "model": ""}}
+        for response, code, retryable in [
+            (Response({"value": "missing"}), "invalid_response", False),
+            (Response({"text": "  "}), "empty_transcription", True),
+        ]:
+            with self.subTest(code=code), patch.dict(os.environ, {"OPENAI_API_KEY": "key"}, clear=True), patch.object(server.client, "CONFIG", config), patch("server.client.urlopen", return_value=response):
+                with self.assertRaises(ServiceError) as caught:
+                    transcribe_audio(b"audio", "audio/webm")
+                self.assertEqual(caught.exception.error_code, code)
+                self.assertEqual(caught.exception.retryable, retryable)
+
+    def test_handler_serializes_structured_service_error(self):
+        handler = object.__new__(AppHandler)
+        handler.path = "/api/transcribe"
+        handler.headers = {"Content-Length": "5", "Content-Type": "audio/webm"}
+        handler.rfile = MagicMock()
+        handler.send_json = MagicMock()
+        error = ServiceError("请求过多", "rate_limited", True, 429)
+        with patch("server.handler.transcribe_audio", side_effect=error):
+            handler.do_POST()
+        self.assertEqual(handler.send_json.call_args.args, (429, {
+            "error": "请求过多",
+            "errorCode": "rate_limited",
+            "retryable": True,
+        }))
 
     def test_system_prompt_contains_composite_decomposition_instructions(self):
         prompt = SYSTEM_PROMPT

@@ -25,10 +25,40 @@ let segmentStartedAt = 0;
 let speechStartedAt = null;
 let lastSoundAt = null;
 let transcribing = false;
+let segmentSequence = 0;
 
 const MIN_SPEECH_MS = 250;
 const MAX_SEGMENT_MS = 10000;
 const SOUND_THRESHOLD = .035;
+const ACCEPTANCE_EVENT = "listen-paint-acceptance";
+
+function emitAcceptance(type, detail = {}) {
+  const payload = { type, timestamp: new Date().toISOString(), ...detail };
+  try {
+    globalThis.dispatchEvent?.(new CustomEvent(ACCEPTANCE_EVENT, { detail: payload }));
+  } catch (_error) {
+    // Acceptance telemetry must never affect drawing or voice behavior.
+  }
+  return payload;
+}
+
+function cloudErrorMessage(errorCode, fallback) {
+  const messages = {
+    configuration_missing: "云端语音识别配置不完整",
+    authentication_failed: "云端密钥无效或已过期",
+    permission_denied: "云端访问被拒绝，请检查账号权限",
+    model_not_found: "云端接口或模型不存在",
+    rate_limited: "云端请求过多或额度不足",
+    network_failure: "云端网络连接失败",
+    timeout: "云端连接超时",
+    invalid_response: "云端返回了无效响应",
+    empty_transcription: "云端未识别到文字",
+    api_unreachable: "未连接到听画 API 服务，请使用 python main.py 启动",
+    microphone_permission: "麦克风权限被拒绝，请在浏览器设置中允许访问",
+    browser_unsupported: "当前浏览器不支持云端录音"
+  };
+  return messages[errorCode] || fallback || "云端语音识别失败";
+}
 
 export function polygonPoints(kind, o) {
   if (kind === "triangle") return `${o.x + o.width / 2},${o.y} ${o.x + o.width},${o.y + o.height} ${o.x},${o.y + o.height}`;
@@ -204,11 +234,16 @@ export async function llmFallback(text) {
     body: JSON.stringify({ text, context: { objects: engine.state.objects.map(({ id, name, kind }) => ({ id, name, kind })), selection: engine.state.selection } })
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error || "模型解析失败");
+  if (!response.ok) {
+    const error = new Error(body.error || "模型解析失败");
+    error.errorCode = body.errorCode || "command_parse_failed";
+    error.retryable = body.retryable === true;
+    throw error;
+  }
   return body.actions;
 }
 
-export async function handleCommand(rawText, confidence = 1) {
+export async function handleCommand(rawText, confidence = 1, metrics = {}) {
   const started = performance.now();
   $("transcript").textContent = rawText;
   console.log("[handleCommand] text=%s confidence=%s", rawText, confidence);
@@ -236,19 +271,21 @@ export async function handleCommand(rawText, confidence = 1) {
     // trigger model fallback.
     if (Number.isFinite(confidence) && confidence > 0 && confidence < .45) {
       console.log("[handleCommand] 低置信度(%.2f)，拒绝回退模型", confidence);
+      emitAcceptance("error", { segmentId: metrics.segmentId, errorCode: "low_confidence", retryable: true, message: "没有听清" });
       return say("没有听清，请再说一次");
     }
     try { actions = await llmFallback(rawText); }
     catch (error) {
       console.log("[handleCommand] 模型回退也失败:", error.message);
+      emitAcceptance("error", { segmentId: metrics.segmentId, errorCode: error.errorCode || "command_parse_failed", retryable: error.retryable === true, message: error.message });
       return say(`${error.message}。请改用标准指令`);
     }
   }
   console.log("[handleCommand] 解析成功，%d 个动作:", actions.length, actions.map(a => a.type + (a.kind ? ":" + a.kind : "")));
-  return executeActions(actions, started);
+  return executeActions(actions, started, "", { ...metrics, transcript: rawText });
 }
 
-function executeActions(actions, started, confirmationMessage = "") {
+function executeActions(actions, started, confirmationMessage = "", metrics = {}) {
   try {
     console.log("[executeActions] 执行 %d 个动作", actions.length);
     const result = engine.execute(actions); render();
@@ -261,10 +298,30 @@ function executeActions(actions, started, confirmationMessage = "") {
     }
     const latency = Math.round(performance.now() - started);
     $("latency").textContent = `本次响应 ${latency}ms`;
+    emitAcceptance("command-completed", {
+      segmentId: metrics.segmentId,
+      transcript: metrics.transcript,
+      success: true,
+      actionCount: actions.length,
+      localDurationMs: latency,
+      endToEndDurationMs: metrics.segmentSubmittedAt == null ? null : Math.round(performance.now() - metrics.segmentSubmittedAt)
+    });
     if (!result.effects.length) say(confirmationMessage || `已执行，共${actions.length}个动作`);
+    return true;
   } catch (error) {
     console.log("[executeActions] 执行失败:", error.message);
+    emitAcceptance("command-completed", {
+      segmentId: metrics.segmentId,
+      transcript: metrics.transcript,
+      success: false,
+      actionCount: actions.length,
+      localDurationMs: Math.round(performance.now() - started),
+      endToEndDurationMs: metrics.segmentSubmittedAt == null ? null : Math.round(performance.now() - metrics.segmentSubmittedAt),
+      errorCode: "command_execution_failed",
+      message: error.message
+    });
     say(error.message);
+    return false;
   }
 }
 
@@ -328,16 +385,26 @@ export async function loadVoiceCapabilities() {
 
 async function ensureCloudResources() {
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder || !(window.AudioContext || window.webkitAudioContext)) {
-    throw new Error("浏览器不支持云端录音");
+    const error = new Error(cloudErrorMessage("browser_unsupported"));
+    error.errorCode = "browser_unsupported";
+    throw error;
   }
   if (mediaStream && audioContext && analyser) {
     if (audioContext.state === "suspended") await audioContext.resume?.();
     return;
   }
   releaseCloudResources();
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-  });
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+  } catch (cause) {
+    const errorCode = ["NotAllowedError", "SecurityError"].includes(cause?.name) ? "microphone_permission" : "microphone_unavailable";
+    const error = new Error(cloudErrorMessage(errorCode, cause?.message || "麦克风不可用"));
+    error.errorCode = errorCode;
+    throw error;
+  }
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   const context = new AudioContext();
   try {
@@ -370,7 +437,12 @@ function beginCloudSegment() {
     const blob = new Blob(audioChunks, { type });
     mediaRecorder = null;
     audioChunks = [];
-    if (disposition === "submit" && blob.size) await transcribeAudio(blob);
+    if (disposition === "submit" && blob.size) {
+      const segmentId = ++segmentSequence;
+      const segmentSubmittedAt = performance.now();
+      emitAcceptance("segment-submitted", { segmentId });
+      await transcribeAudio(blob, { segmentId, segmentSubmittedAt });
+    }
     if (listeningWanted && !speaking && !fallbackPending && !transcribing) startCloudListening();
   };
   mediaRecorder.start(250);
@@ -413,11 +485,11 @@ function releaseCloudResources() {
 async function startCloudListening() {
   if (!listeningWanted || speaking || fallbackPending || transcribing) return;
   if (backendApiAvailable === false) {
-    showFallbackPrompt("未连接到听画 API 服务，请使用 python main.py 启动");
+    showFallbackPrompt(cloudErrorMessage("api_unreachable"), "api_unreachable", true);
     return;
   }
   if (cloudConfigured === false) {
-    showFallbackPrompt("云端未配置 OPENAI_API_KEY");
+    showFallbackPrompt(cloudErrorMessage("configuration_missing"), "configuration_missing", false);
     return;
   }
   try {
@@ -431,11 +503,11 @@ async function startCloudListening() {
     beginCloudSegment();
     if (!audioMonitorTimer) audioMonitorTimer = setInterval(monitorCloudAudio, 100);
   } catch (error) {
-    showFallbackPrompt(error.message || "云端语音识别启动失败");
+    showFallbackPrompt(error.message || "云端语音识别启动失败", error.errorCode || "capture_start_failed");
   }
 }
 
-export async function transcribeAudio(blob) {
+export async function transcribeAudio(blob, metrics = {}) {
   transcribing = true;
   stopCloudCapture();
   updateListeningUi("正在转写");
@@ -461,29 +533,41 @@ export async function transcribeAudio(blob) {
         isListenPaintApi, contentType, isNonApiResponse);
       if (isNonApiResponse) {
         backendApiAvailable = false;
-        throw new Error("未连接到听画 API 服务，请使用 python main.py 启动");
+        const error = new Error(cloudErrorMessage("api_unreachable"));
+        error.errorCode = "api_unreachable";
+        throw error;
       }
     }
     const body = await response.json();
     if (!response.ok) {
       console.log("[transcribeAudio] API 返回错误:", body.error);
-      throw new Error(body.error || "云端语音识别失败");
+      const error = new Error(cloudErrorMessage(body.errorCode, body.error));
+      error.errorCode = body.errorCode || "service_error";
+      error.retryable = body.retryable === true;
+      throw error;
     }
     if (!body.text?.trim()) {
       console.log("[transcribeAudio] API 返回空文本");
       throw new Error("云端语音识别未返回文字");
     }
     console.log("[transcribeAudio] 识别文本:", body.text);
-    await handleCommand(body.text.trim());
+    emitAcceptance("transcription-completed", {
+      segmentId: metrics.segmentId,
+      transcript: body.text.trim(),
+      transcriptionDurationMs: metrics.segmentSubmittedAt == null ? null : Math.round(performance.now() - metrics.segmentSubmittedAt)
+    });
+    await handleCommand(body.text.trim(), 1, metrics);
   } catch (error) {
     console.log("[transcribeAudio] 错误:", error.message);
-    showFallbackPrompt(error.message);
+    const errorCode = error.errorCode || (error instanceof TypeError ? "api_unreachable" : "transcription_failed");
+    showFallbackPrompt(cloudErrorMessage(errorCode, error.message), errorCode, error.retryable === true);
   } finally {
     transcribing = false;
   }
 }
 
-function showFallbackPrompt(reason) {
+function showFallbackPrompt(reason, errorCode = "cloud_unavailable", retryable = true) {
+  emitAcceptance("error", { errorCode, retryable, message: reason });
   fallbackPending = true;
   releaseCloudResources();
   listeningWanted = false;
