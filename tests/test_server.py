@@ -24,6 +24,15 @@ class Response:
 
 
 class ServerTests(unittest.TestCase):
+    def test_shared_action_validation_vectors(self):
+        vectors = json.loads((Path(__file__).parent / "action_vectors.json").read_text(encoding="utf-8"))
+        for actions in vectors["valid"]:
+            with self.subTest(kind="valid", actions=actions):
+                self.assertEqual(main.validate_actions(actions), actions)
+        for actions in vectors["invalid"]:
+            with self.subTest(kind="invalid", actions=actions), self.assertRaises(ValueError):
+                main.validate_actions(actions)
+
     def test_server_uses_exclusive_port_binding(self):
         self.assertFalse(main.ExclusiveThreadingHTTPServer.allow_reuse_address)
 
@@ -148,12 +157,28 @@ class ServerTests(unittest.TestCase):
             {"type": "canvas", "operation": "background", "color": "red"},
             {"type": "export", "format": "pdf"},
             {"type": "help", "payload": "unexpected"},
+            {"type": "create", "kind": "rect", "_compositeId": 1},
+            {"type": "create", "kind": "rect", "_private": 1},
         ]
         for action in invalid:
             with self.subTest(action=action), self.assertRaises(ValueError):
                 main.validate_actions([action])
         with self.assertRaisesRegex(ValueError, "单独执行"):
             main.validate_actions([{"type": "history", "operation": "undo"}, {"type": "help"}])
+
+    def test_parse_endpoint_rejects_non_positive_or_missing_content_length(self):
+        handler = object.__new__(main.AppHandler)
+        handler.path = "/api/parse"
+        handler.rfile = MagicMock()
+        handler.send_json = MagicMock()
+        for value in (None, "0", "-1"):
+            with self.subTest(value=value):
+                handler.headers = {} if value is None else {"Content-Length": value}
+                handler.do_POST()
+                self.assertEqual(handler.rfile.read.call_count, 0)
+                self.assertEqual(handler.send_json.call_args.args[0], 400)
+                handler.rfile.reset_mock()
+                handler.send_json.reset_mock()
 
     def test_timeout_becomes_service_error(self):
         config = {"speech_to_text": {"base_url": "", "model": ""}, "command_model": {"base_url": "https://example.test/v1", "model": "model"}}

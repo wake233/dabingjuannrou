@@ -28,7 +28,31 @@ class FakeElement {
   }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   getAttribute(name) { return this.attributes[name] ?? null; }
+  removeAttribute(name) { delete this.attributes[name]; }
   replaceChildren(...children) { this.children = children; }
+  cloneNode(deep = false) {
+    const clone = new FakeElement(this.tagName, this.id);
+    clone.attributes = { ...this.attributes };
+    clone.style = { ...this.style };
+    clone.children = deep ? this.children.map(child => child.cloneNode(true)) : [];
+    return clone;
+  }
+  querySelector(selector) {
+    if (selector.startsWith("#") && this.id === selector.slice(1)) return this;
+    for (const child of this.children) {
+      const found = child.querySelector(selector);
+      if (found) return found;
+    }
+    return null;
+  }
+  querySelectorAll(selector) {
+    const matches = [];
+    if (selector === '[filter="url(#selection-glow)"]' && this.getAttribute("filter") === "url(#selection-glow)") matches.push(this);
+    if (selector === ".preview" && this.classList.contains("preview")) matches.push(this);
+    for (const child of this.children) matches.push(...child.querySelectorAll(selector));
+    return matches;
+  }
+  remove() { this.removed = true; }
   click() { this.clicked = true; this.onclick?.(); }
 }
 
@@ -46,6 +70,13 @@ function installBrowser() {
   const canvasCalls = [];
   const recognitions = [];
   let objectUrl = 0;
+  const storage = new Map();
+  globalThis.localStorage = {
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, String(value)),
+    removeItem: key => storage.delete(key),
+    clear: () => storage.clear()
+  };
 
   globalThis.document = {
     getElementById: id => elements[id],
@@ -109,7 +140,11 @@ function installBrowser() {
   };
   globalThis.XMLSerializer = class {
     serializeToString(element) {
-      return `<svg id="${element.id}" style="background:${element.style.background || ""}"></svg>`;
+      const serialize = item => {
+        const attrs = Object.entries(item.attributes).map(([key, value]) => ` ${key}="${value}"`).join("");
+        return `<${item.tagName}${item.id ? ` id="${item.id}"` : ""}${attrs}>${item.children.filter(child => !child.removed).map(serialize).join("")}${item.textContent || ""}</${item.tagName}>`;
+      };
+      return serialize(element);
     }
   };
   globalThis.URL = {
@@ -614,7 +649,8 @@ test("云端转写失败后等待用户确认降级", async () => {
   assert.equal(browser.elements["voice-status"].textContent, "已暂停");
 });
 
-test("云端 API 返回 404 时自动切换浏览器识别", async () => {
+test("云端 API 返回 404 时仍等待用户确认后切换浏览器识别", async () => {
+  await app.switchVoiceMode("cloud");
   const recognition = browser.recognitions[0];
   const startsBefore = recognition.startCount;
   globalThis.fetch = async () => ({
@@ -627,9 +663,12 @@ test("云端 API 返回 404 时自动切换浏览器识别", async () => {
   await app.transcribeAudio(new Blob(["audio"], { type: "audio/webm" }));
   await new Promise(resolve => setTimeout(resolve, 0));
 
+  assert.equal(app.getVoiceMode(), "cloud");
+  assert.equal(browser.elements["fallback-panel"].hidden, false);
+  assert.equal(browser.elements["voice-status"].textContent, "等待降级确认");
+  browser.elements["fallback-browser"].click();
   assert.equal(app.getVoiceMode(), "browser");
   assert.equal(browser.elements["fallback-panel"].hidden, true);
-  assert.equal(browser.elements["voice-status"].textContent, "API 服务不可用，已切换浏览器识别");
   browser.elements["listen-button"].click();
   globalThis.fetch = async () => ({
     ok: true,
@@ -744,7 +783,7 @@ test("浏览器识别网络错误会停止自动重启并显示明确提示", ()
   assert.equal(browser.elements["voice-status"].textContent, "浏览器语音识别服务网络不可用");
 });
 
-test("云端未配置时自动切换到浏览器识别", async () => {
+test("云端未配置时保留云端模式并提示可切换浏览器识别", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({
     ok: true,
@@ -754,12 +793,11 @@ test("云端未配置时自动切换到浏览器识别", async () => {
 
   await app.loadVoiceCapabilities();
 
-  assert.equal(app.getVoiceMode(), "browser");
-  assert.equal(browser.elements["voice-status"].textContent, "云端未配置 OPENAI_API_KEY，已切换浏览器识别");
+  assert.equal(app.getVoiceMode(), "cloud");
+  assert.equal(browser.elements["voice-status"].textContent, "云端未配置 OPENAI_API_KEY，可切换浏览器识别");
   browser.elements["mode-switch-button"].click();
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(app.getVoiceMode(), "browser");
-  assert.equal(browser.elements.toast.textContent, "当前没有其他可用的语音识别模式");
   globalThis.fetch = async () => ({
     ok: true,
     json: async () => ({ apiVersion: 1, cloudTranscriptionConfigured: true, cloudTranscriptionIssue: null, commandModelConfigured: true })
@@ -874,6 +912,24 @@ test("SVG 导出白色背景时不添加多余背景矩形", () => {
 
   assert.ok(capturedParts, "download 应创建 Blob");
   assert.ok(!/<rect[^>]*fill="#ffffff"/.test(capturedParts.join("")), "默认白色背景不应添加多余的 rect");
+});
+
+test("选中图形和预览存在时导出源不含选择高亮或预览", () => {
+  resetApp();
+  app.engine.execute([{ type: "create", kind: "rect" }, { type: "select", target: "all" }]);
+  app.render();
+  browser.elements["preview-layer"].replaceChildren(new FakeElement("rect"));
+  const OriginalBlob = Blob;
+  let capturedParts = null;
+  globalThis.Blob = function(parts, options) {
+    capturedParts = parts;
+    return new OriginalBlob(parts, options);
+  };
+  app.download("svg");
+  globalThis.Blob = OriginalBlob;
+  const source = capturedParts.join("");
+  assert.doesNotMatch(source, /selection-glow/);
+  assert.doesNotMatch(source, /preview-layer[^>]*><rect/);
 });
 
 test("确认窗口期间非确认指令被忽略", async () => {
@@ -1245,12 +1301,12 @@ test("app.js 导出 switchVoiceMode 和 getVoiceMode 函数", () => {
   assert.equal(typeof app.isVoskReady, "function", "isVoskReady should be exported");
 });
 
-test("getVoiceMode 初始返回 cloud", () => {
-  // At module load time in test environment, voiceMode should be "cloud"
+test("getVoiceMode 可恢复并报告当前生产模式", async () => {
+  await app.switchVoiceMode("cloud");
   assert.equal(app.getVoiceMode(), "cloud");
 });
 
-test("switchVoiceMode 可在模式间切换", async () => {
+test("switchVoiceMode 仅允许云端和浏览器模式", async () => {
   // Mock IndexedDB for model availability check
   const origIndexedDB = globalThis.indexedDB;
   globalThis.indexedDB = {
@@ -1264,6 +1320,7 @@ test("switchVoiceMode 可在模式间切换", async () => {
   };
 
   // Start in cloud mode, switch to browser, then back to cloud
+  await app.switchVoiceMode("cloud");
   assert.equal(app.getVoiceMode(), "cloud");
 
   await app.switchVoiceMode("browser");
@@ -1276,9 +1333,8 @@ test("switchVoiceMode 可在模式间切换", async () => {
   assert.equal(app.getVoiceMode(), "cloud");
   assert.equal(browser.elements["mode-indicator"].textContent, "🌐 云端");
 
-  // Switch to offline (will fall back to cloud since model unavailable)
+  // Offline is an isolated experiment and is not user-switchable in V2.
   await app.switchVoiceMode("offline");
-  // Should have fallen back to cloud since model is not available
   assert.equal(app.getVoiceMode(), "cloud");
 
   // Clean up
@@ -1313,4 +1369,39 @@ test("模式切换后 UI 指示器更新", async () => {
 
 test("isVoskReady 在无模型时返回 false", () => {
   assert.equal(app.isVoskReady(), false);
+});
+
+test("语音可切换和查询两种生产识别模式且不提供离线入口", async () => {
+  resetApp();
+  await app.handleCommand("切换到浏览器识别");
+  assert.equal(app.getVoiceMode(), "browser");
+  const before = JSON.stringify(app.engine.state);
+  await app.handleCommand("当前识别模式");
+  assert.equal(app.getVoiceMode(), "browser");
+  assert.equal(JSON.stringify(app.engine.state), before);
+  await app.handleCommand("切换到云端识别");
+  assert.equal(app.getVoiceMode(), "cloud");
+  await app.handleCommand("切换到离线识别");
+  assert.equal(app.getVoiceMode(), "cloud");
+});
+
+test("工程自动保存只在成功提交后更新并支持安全加载与丢弃", async () => {
+  localStorage.clear();
+  resetApp();
+  await app.handleCommand("画一个矩形");
+  const stored = localStorage.getItem("listen-paint-autosave-v1");
+  assert.ok(stored);
+  const saved = JSON.parse(stored);
+  assert.equal(saved.state.objects.length, 1);
+  await app.handleCommand("顶部对齐");
+  assert.equal(localStorage.getItem("listen-paint-autosave-v1"), stored);
+
+  const project = app.saveProjectData();
+  app.engine.state = initialState();
+  app.loadProjectData(project);
+  assert.equal(app.engine.state.objects.length, 1);
+  assert.throws(() => app.loadProjectData({ format: "listen-paint", version: 99 }));
+  assert.equal(app.engine.state.objects.length, 1);
+  await app.handleCommand("丢弃上次工程");
+  assert.equal(localStorage.getItem("listen-paint-autosave-v1"), null);
 });

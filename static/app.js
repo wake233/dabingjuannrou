@@ -20,7 +20,10 @@ let suppressBrowserFinalUntil = 0;
 let speechSequence = 0;
 let pendingConfirmation = null;
 let confirmationTimer = null;
-let voiceMode = "cloud";
+const VOICE_MODE_KEY = "listen-paint-voice-mode";
+const AUTOSAVE_KEY = "listen-paint-autosave-v1";
+const savedVoiceMode = globalThis.localStorage?.getItem?.(VOICE_MODE_KEY);
+let voiceMode = ["cloud", "browser"].includes(savedVoiceMode) ? savedVoiceMode : "cloud";
 let cloudConfigured = null;
 let backendApiAvailable = null;
 let voskRecognizer = null;
@@ -195,7 +198,7 @@ function describeState() {
 }
 
 export function download(format) {
-  const source = new XMLSerializer().serializeToString($("canvas"));
+  const source = exportSvgSource();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   if (format === "svg") {
     let svgContent = source;
@@ -213,6 +216,15 @@ export function download(format) {
     canvas.toBlob(blob => saveBlob(blob, `听画-${stamp}.png`)); URL.revokeObjectURL(url);
   };
   image.src = url;
+}
+
+function exportSvgSource() {
+  const canvas = $("canvas");
+  const clean = canvas.cloneNode?.(true) || canvas;
+  clean.querySelector?.("#preview-layer")?.replaceChildren();
+  clean.querySelectorAll?.('[filter="url(#selection-glow)"]').forEach(element => element.removeAttribute("filter"));
+  clean.querySelectorAll?.(".preview").forEach(element => element.remove());
+  return new XMLSerializer().serializeToString(clean);
 }
 
 function saveBlob(blob, name) {
@@ -253,6 +265,25 @@ export async function handleCommand(rawText, confidence = 1) {
     say("请说确认或取消");
     return;
   }
+  const modeCommand = rawText.trim();
+  if (/^(切换到|使用)云端识别$/.test(modeCommand)) {
+    await switchVoiceMode("cloud");
+    return say("已切换到云端识别");
+  }
+  if (/^(切换到|使用)浏览器识别$/.test(modeCommand)) {
+    await switchVoiceMode("browser");
+    return say(voiceMode === "browser" ? "已切换到浏览器识别" : "浏览器识别不可用");
+  }
+  if (/^(当前识别模式|现在是什么模式)$/.test(modeCommand)) {
+    return say(voiceMode === "browser" ? "当前是浏览器识别" : "当前是云端识别");
+  }
+  if (/离线识别|离线模式|下载离线模型/.test(modeCommand)) {
+    return say("第二版不提供离线识别，请使用云端或浏览器识别");
+  }
+  if (/^丢弃上次工程$/.test(modeCommand)) {
+    discardAutosave();
+    return say("已丢弃上次工程");
+  }
   // Voice sleep: return to wake-word listening from full listening
   if (listeningWanted && /^(休息|停止聆听)$/.test(rawText.trim())) {
     console.log("[handleCommand] 进入后台聆听模式");
@@ -292,6 +323,7 @@ function executeActions(actions, started, confirmationMessage = "") {
   try {
     console.log("[executeActions] 执行 %d 个动作", actions.length);
     const result = engine.execute(actions); render();
+    if (actions.some(action => !["export", "help", "status"].includes(action.type))) saveAutosave();
     console.log("[executeActions] 执行成功, 画布图形数:", engine.state.objects.length, "效果:", result.effects.length);
     for (const effect of result.effects) {
       if (effect.type === "export") download(effect.format);
@@ -366,7 +398,7 @@ function resumeVoiceInput() {
 }
 
 function startRecognition() {
-  if (!recognition || !listeningWanted || speaking || recognitionActive || voiceMode !== "browser") {
+  if (!recognition || !listeningWanted || speaking || recognitionActive || (voiceMode !== "browser" && !fallbackPending)) {
     console.log("[startRecognition] 跳过: recognition=%s listeningWanted=%s speaking=%s recognitionActive=%s voiceMode=%s",
       !!recognition, listeningWanted, speaking, recognitionActive, voiceMode);
     return;
@@ -407,9 +439,7 @@ export async function loadVoiceCapabilities() {
         : "云端语音识别配置不完整";
     if (!cloudConfigured && voiceMode === "cloud" && !listeningWanted && !wakeWordActive) {
       if (recognition) {
-        voiceMode = "browser";
-        updateModeIndicator();
-        updateListeningUi(`${cloudIssue}，已切换浏览器识别`);
+        updateListeningUi(`${cloudIssue}，可切换浏览器识别`);
       } else {
         updateListeningUi(`${cloudIssue}，浏览器也不支持语音识别`);
       }
@@ -419,9 +449,7 @@ export async function loadVoiceCapabilities() {
     cloudConfigured = false;
     if (voiceMode === "cloud" && !listeningWanted && !wakeWordActive) {
       if (recognition) {
-        voiceMode = "browser";
-        updateModeIndicator();
-        updateListeningUi("未连接到听画 API 服务，已切换浏览器识别");
+        updateListeningUi("未连接到听画 API 服务，可切换浏览器识别");
       } else {
         updateListeningUi("未连接到听画 API 服务，请使用 python main.py 启动");
       }
@@ -699,7 +727,7 @@ function releaseOfflineResources() {
 // ── Mode switching ──────────────────────────────────────────────
 
 export async function switchVoiceMode(mode) {
-  if (!["offline", "cloud", "browser"].includes(mode)) {
+  if (!["cloud", "browser"].includes(mode)) {
     toast(`不支持的模式: ${mode}`);
     return;
   }
@@ -719,53 +747,26 @@ export async function switchVoiceMode(mode) {
   clearPreview();
 
   voiceMode = mode;
+  globalThis.localStorage?.setItem?.(VOICE_MODE_KEY, voiceMode);
   updateModeIndicator();
-
-  // If mode is offline, check model availability
-  if (mode === "offline") {
-    // Per DESIGN.md §7.1–7.2: real Vosk WASM is not yet integrated.
-    // checkModelAvailability now returns available:true only when
-    // both the WASM module and model data are ready.
-    const avail = await checkModelAvailability();
-    voskModelAvailable = avail.available;
-    if (!voskModelAvailable) {
-      const detail = avail.modelCached
-        ? "离线模型已下载但识别模块未加载，真实离线识别尚未实现"
-        : "离线模型未下载，请先下载模型或选择其他模式";
-      toast(detail);
-      // Fall back to the next-best available mode
-      const fallbackMode = cloudConfigured !== false ? "cloud" : (recognition ? "browser" : voiceMode);
-      voiceMode = fallbackMode;
-      updateModeIndicator();
-      if (!wasListening && !wasWakeWordActive) {
-        const idleStatus = fallbackMode === "cloud"
-          ? (cloudConfigured === false ? "云端语音识别未配置" : "云端识别待启动")
-          : fallbackMode === "browser" ? "浏览器识别待启动" : "离线模式不可用";
-        updateListeningUi(idleStatus);
-      }
-      // If we were listening, restart in the fallback mode
-      if (wasListening && voiceMode !== "offline") {
-        listeningWanted = true;
-        if (voiceMode === "cloud") startCloudListening();
-        else if (voiceMode === "browser") startRecognition();
-      }
-      return;
-    }
+  if (mode === "browser" && !recognition) {
+    voiceMode = "cloud";
+    globalThis.localStorage?.setItem?.(VOICE_MODE_KEY, voiceMode);
+    updateModeIndicator();
+    updateListeningUi("浏览器不支持语音识别，已保留云端模式");
+    return;
   }
 
   if (!wasListening && !wasWakeWordActive) {
     const idleStatus = voiceMode === "cloud"
       ? (cloudConfigured === false ? "云端语音识别未配置" : "云端识别待启动")
-      : voiceMode === "browser" ? "浏览器识别待启动" : "离线识别待启动";
+      : "浏览器识别待启动";
     updateListeningUi(idleStatus);
   }
 
   // Restart if was listening
   if (wasListening) {
-    if (voiceMode === "offline" && voskModelAvailable) {
-      listeningWanted = true;
-      await startOfflineListening();
-    } else if (voiceMode === "cloud") {
+    if (voiceMode === "cloud") {
       listeningWanted = true;
       startCloudListening();
     } else if (voiceMode === "browser") {
@@ -784,21 +785,7 @@ export async function switchVoiceMode(mode) {
 function updateModeIndicator() {
   const indicator = $("mode-indicator");
   if (!indicator) return;
-  const status = voskRecognizer?.getStatus?.() || (voskReady ? "ready" : "unavailable");
-  if (voiceMode === "offline") {
-    // Per DESIGN.md §7.1–7.2: real Vosk WASM is not yet integrated.
-    // "ready" via mock is NOT real offline — mark as experimental until WASM is loaded.
-    const voskModuleReady = typeof globalThis !== "undefined"
-      && globalThis.VoskModule
-      && typeof globalThis.VoskModule.createModel === "function";
-    if (voskModuleReady && status === "ready") {
-      indicator.textContent = "💻 离线";
-    } else if (voskModelAvailable) {
-      indicator.textContent = "💻⚠ 离线(实验性)";
-    } else {
-      indicator.textContent = "💻🚫 离线不可用";
-    }
-  } else if (voiceMode === "cloud") {
+  if (voiceMode === "cloud") {
     indicator.textContent = "🌐 云端";
   } else {
     indicator.textContent = "🌐↓ 浏览器";
@@ -838,10 +825,7 @@ async function startCloudListening() {
   if (!listeningWanted || speaking || fallbackPending || transcribing || voiceMode !== "cloud") return;
   if (backendApiAvailable === false) {
     if (recognition) {
-      voiceMode = "browser";
-      updateModeIndicator();
-      updateListeningUi("未连接到听画 API 服务，已切换浏览器识别");
-      startRecognition();
+      showFallbackPrompt("未连接到听画 API 服务，请使用 python main.py 启动");
     } else {
       listeningWanted = false;
       updateListeningUi("未连接到听画 API 服务，请使用 python main.py 启动");
@@ -850,10 +834,7 @@ async function startCloudListening() {
   }
   if (cloudConfigured === false) {
     if (recognition) {
-      voiceMode = "browser";
-      updateModeIndicator();
-      updateListeningUi("云端未配置，已切换浏览器识别");
-      startRecognition();
+      showFallbackPrompt("云端未配置 OPENAI_API_KEY");
     } else {
       listeningWanted = false;
       updateListeningUi("云端未配置，浏览器也不支持语音识别");
@@ -1003,6 +984,8 @@ function handleWakeWordResult(text) {
 function onWakeSuccess() {
   stopWakeWordListening();
   listeningWanted = true;
+  fallbackPending = false;
+  $("fallback-panel").hidden = true;
   updateListeningUi("正在启动");
   $("wave").classList.add("active");
   say("听画已唤醒");
@@ -1089,17 +1072,7 @@ export async function transcribeAudio(blob) {
     await handleCommand(body.text.trim());
   } catch (error) {
     console.log("[transcribeAudio] 错误:", error.message);
-    if (apiUnavailableError && recognition) {
-      voiceMode = "browser";
-      fallbackPending = false;
-      $("fallback-panel").hidden = true;
-      updateModeIndicator();
-      updateListeningUi("API 服务不可用，已切换浏览器识别");
-      toast(error.message);
-      startRecognition();
-    } else {
-      showFallbackPrompt(error.message);
-    }
+    showFallbackPrompt(error.message);
   } finally {
     transcribing = false;
   }
@@ -1110,16 +1083,12 @@ function showFallbackPrompt(reason) {
   releaseCloudResources();
   // Check if browser recognition is actually available before switching
   if (recognition) {
-    voiceMode = "browser";
-    updateModeIndicator();
     updateListeningUi("等待降级确认");
     $("fallback-panel").hidden = false;
     say(`${reason}。请选择使用浏览器识别或停止聆听`);
     startFallbackDecisionRecognition();
   } else {
     // No browser recognition available — only option is to stop
-    voiceMode = "browser";
-    updateModeIndicator();
     listeningWanted = false;
     updateListeningUi("语音识别不可用，请点击按钮重试");
     $("fallback-panel").hidden = false;
@@ -1142,6 +1111,8 @@ export function useBrowserRecognition() {
   fallbackPending = false;
   $("fallback-panel").hidden = true;
   voiceMode = "browser";
+  globalThis.localStorage?.setItem?.(VOICE_MODE_KEY, voiceMode);
+  updateModeIndicator();
   updateListeningUi("浏览器识别");
   startRecognition();
 }
@@ -1325,22 +1296,12 @@ function setupVoice() {
     console.warn("[setupVoice] 浏览器不支持 Web Speech API，请使用 Chrome 或 Edge");
     $("voice-status").textContent = "浏览器不支持语音识别";
     toast("⚠️ 请使用 Chrome 或 Edge 浏览器以获得语音识别支持");
-  }
-
-  // ── Offline mode UI bindings ──
-  // Check Vosk model availability on startup
-  checkModelAvailability().then((result) => {
-    voskModelAvailable = result.available;
-    updateModeIndicator();
-    if (result.available) {
-      toast("离线模型已就绪，可切换至离线模式");
-    } else {
-      const downloadBtn = $("download-model-button");
-      if (downloadBtn) downloadBtn.hidden = false;
+    if (voiceMode === "browser") {
+      voiceMode = "cloud";
+      globalThis.localStorage?.setItem?.(VOICE_MODE_KEY, voiceMode);
+      updateModeIndicator();
     }
-  }).catch(() => {
-    voskModelAvailable = false;
-  });
+  }
 
   // Mode switch button
   const modeSwitchBtn = $("mode-switch-button");
@@ -1349,8 +1310,7 @@ function setupVoice() {
       const modes = [];
       if (cloudConfigured !== false) modes.push("cloud");
       if (recognition) modes.push("browser");
-      if (voskModelAvailable) modes.push("offline");
-      if (modes.length <= 1) {
+      if (modes.length <= 1 && modes.includes(voiceMode)) {
         toast("当前没有其他可用的语音识别模式");
         return;
       }
@@ -1358,12 +1318,6 @@ function setupVoice() {
       const nextMode = modes[(currentIndex + 1) % modes.length];
       switchVoiceMode(nextMode);
     };
-  }
-
-  // Download model button
-  const downloadBtn = $("download-model-button");
-  if (downloadBtn) {
-    downloadBtn.onclick = () => startModelDownload();
   }
 
   $("listen-button").onclick = () => {
@@ -1391,8 +1345,35 @@ export function testEnterFullListening(mode = "cloud") {
   $("fallback-panel").hidden = true;
   updateModeIndicator();
   if (mode === "cloud") startCloudListening();
-  else if (mode === "offline") startOfflineListening();
   else { updateListeningUi("浏览器识别"); startRecognition(); }
 }
 
-render(); setupVoice();
+export function saveProjectData() {
+  return engine.serializeProject();
+}
+
+export function loadProjectData(project) {
+  engine.loadProject(project);
+  render();
+  saveAutosave();
+}
+
+function saveAutosave() {
+  globalThis.localStorage?.setItem?.(AUTOSAVE_KEY, JSON.stringify(engine.serializeProject()));
+}
+
+export function discardAutosave() {
+  globalThis.localStorage?.removeItem?.(AUTOSAVE_KEY);
+}
+
+function restoreAutosave() {
+  const stored = globalThis.localStorage?.getItem?.(AUTOSAVE_KEY);
+  if (!stored) return;
+  try {
+    engine.loadProject(JSON.parse(stored));
+  } catch (_error) {
+    toast("上次工程已损坏，已忽略");
+  }
+}
+
+restoreAutosave(); render(); setupVoice();

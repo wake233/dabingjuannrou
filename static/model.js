@@ -11,6 +11,10 @@ const POSITIONS = new Set(["左边", "右边", "上边", "下边", "左上角", 
 const ALIGN_MODES = new Set(["left", "right", "top", "bottom", "hcenter", "vcenter"]);
 const AXES = new Set(["horizontal", "vertical"]);
 const UPDATE_FIELDS = new Set(["fill", "stroke", "strokeWidth", "opacity", "rotation", "text", "width", "height", "zOrder"]);
+const PROJECT_NAME_MAX_LENGTH = 100;
+const HISTORY_LIMIT = 50;
+const SHAPE_ID_PATTERN = /^shape-[1-9]\d*$/;
+const GROUP_ID_PATTERN = /^group-[1-9]\d*$/;
 const ACTION_FIELDS = {
   create: new Set(["type", "kind", "position", "x", "y", "width", "height", "fill", "stroke", "strokeWidth", "opacity", "rotation", "text"]),
   select: new Set(["type", "target"]),
@@ -80,6 +84,30 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isProjectString(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= PROJECT_NAME_MAX_LENGTH;
+}
+
+function isProjectId(value, pattern) {
+  return isProjectString(value) && pattern.test(value) && Number.isSafeInteger(Number(value.slice(value.lastIndexOf("-") + 1)));
+}
+
+function projectIdNumber(value) {
+  return Number(value.slice(value.lastIndexOf("-") + 1));
+}
+
+function generatedNameIndex(kind, name) {
+  const prefix = TYPE_NAMES[kind];
+  if (!prefix || !name.startsWith(prefix)) return null;
+  const suffix = name.slice(prefix.length);
+  for (let index = 1; index < 100; index += 1) {
+    if (suffix === chineseIndex(index)) return index;
+  }
+  if (!/^[1-9]\d*$/.test(suffix)) return null;
+  const index = Number(suffix);
+  return Number.isSafeInteger(index) && index >= 100 ? index : null;
+}
+
 function requireFields(action, ...fields) {
   for (const field of fields) {
     if (!(field in action)) throw new Error(`${action.type} 缺少字段 ${field}`);
@@ -88,9 +116,10 @@ function requireFields(action, ...fields) {
 
 function validateKnownFields(action) {
   for (const field of Object.keys(action)) {
-    // Fields prefixed with "_" are internal metadata (e.g. _composite)
-    // and are exempt from the allowed-fields whitelist.
-    if (field.startsWith("_")) continue;
+    if (field === "_compositeId") {
+      if (!Number.isInteger(action[field]) || action[field] <= 0) throw new Error("复合动作元数据无效");
+      continue;
+    }
     if (!ACTION_FIELDS[action.type].has(field)) throw new Error(`${action.type} 包含不允许的字段 ${field}`);
   }
 }
@@ -225,6 +254,8 @@ function resolve(state, target = "selected") {
   if (target === "lastTwo") return state.objects.slice(-2);
   if (target === "all") return [...state.objects];
   if (typeof target === "string") {
+    const group = state.groups[target] || Object.values(state.groups).find(item => item.name === target);
+    if (group) return state.objects.filter(o => group.members.includes(o.id));
     const exact = state.objects.find(o => o.id === target || o.name === target);
     if (exact) return [exact];
     return state.objects.filter(o => TYPE_NAMES[o.kind] === target);
@@ -239,14 +270,14 @@ function requireTargets(state, target, minimum = 1) {
 }
 
 function reconcileGroups(state) {
-  for (const [groupId, memberIds] of Object.entries(state.groups)) {
-    const members = state.objects.filter(o => memberIds.includes(o.id));
+  for (const [groupId, group] of Object.entries(state.groups)) {
+    const members = state.objects.filter(o => group.members.includes(o.id));
     if (members.length < 2) {
       members.forEach(o => { if (o.groupId === groupId) delete o.groupId; });
       delete state.groups[groupId];
       continue;
     }
-    state.groups[groupId] = members.map(o => o.id);
+    group.members = members.map(o => o.id);
   }
   const validGroups = new Set(Object.keys(state.groups));
   state.objects.forEach(o => { if (o.groupId && !validGroups.has(o.groupId)) delete o.groupId; });
@@ -267,7 +298,7 @@ function positionFor(name, width, height) {
   return positions[name] || positions["中央"];
 }
 
-function createObject(state, action) {
+function createObject(state, action, context = {}) {
   if (!DEFAULTS[action.kind]) throw new Error("不支持的图形类型");
   const count = (state.counters[action.kind] || 0) + 1;
   state.counters[action.kind] = count;
@@ -280,18 +311,21 @@ function createObject(state, action) {
     kind: action.kind, x: Number.isFinite(action.x) ? action.x : px,
     y: Number.isFinite(action.y) ? action.y : py, width, height,
     fill: action.fill || (["line", "arrow"].includes(action.kind) ? "none" : "#4f8cff"),
-    stroke: action.stroke || "#26364a", strokeWidth: Number(action.strokeWidth) || 3,
+    stroke: action.stroke || "#26364a", strokeWidth: action.strokeWidth ?? 3,
     opacity: Number.isFinite(action.opacity) ? action.opacity : 1,
     rotation: Number(action.rotation) || 0, text: action.text || "文字"
   };
   state.objects.push(object);
   state.selection = [object.id];
-  state.lastCreated = [object.id];
+  if (action._compositeId && context.lastCompositeId === action._compositeId) state.lastCreated.push(object.id);
+  else state.lastCreated = [object.id];
+  context.lastCompositeId = action._compositeId || null;
   return object;
 }
 
-function applyAction(state, action) {
-  if (action.type === "create") return createObject(state, action);
+function applyAction(state, action, context) {
+  if (action.type === "create") return createObject(state, action, context);
+  context.lastCompositeId = null;
   if (action.type === "select") {
     if (action.target === "none") state.selection = [];
     else {
@@ -365,7 +399,7 @@ function applyAction(state, action) {
     const targets = requireTargets(state, action.target);
     const ids = [];
     for (const original of targets) {
-      const duplicate = createObject(state, { ...original, kind: original.kind, x: original.x + 25, y: original.y + 25 });
+      const duplicate = createObject(state, { ...original, kind: original.kind, x: original.x + 25, y: original.y + 25 }, context);
       duplicate.text = original.text;
       ids.push(duplicate.id);
     }
@@ -383,13 +417,13 @@ function applyAction(state, action) {
   if (action.type === "group") {
     const targets = requireTargets(state, action.target, 2);
     const targetIds = new Set(targets.map(o => o.id));
-    for (const [groupId, memberIds] of Object.entries(state.groups)) {
-      state.groups[groupId] = memberIds.filter(id => !targetIds.has(id));
+    for (const group of Object.values(state.groups)) {
+      group.members = group.members.filter(id => !targetIds.has(id));
     }
     targets.forEach(o => { delete o.groupId; });
     reconcileGroups(state);
     const groupId = `group-${state.nextGroupId++}`;
-    state.groups[groupId] = targets.map(o => o.id);
+    state.groups[groupId] = { id: groupId, name: `组合${chineseIndex(state.nextGroupId - 1)}`, members: targets.map(o => o.id) };
     targets.forEach(o => { o.groupId = groupId; });
     return;
   }
@@ -430,12 +464,13 @@ export class DrawingEngine {
     const before = copy(this.state);
     const working = copy(this.state);
     try {
-      mutations.forEach(action => applyAction(working, action));
+      const context = { lastCompositeId: null };
+      mutations.forEach(action => applyAction(working, action, context));
     } catch (error) {
       throw error;
     }
     this.undoStack.push(before);
-    if (this.undoStack.length > 50) this.undoStack.shift();
+    if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
     this.redoStack = [];
     this.state = working;
     return { state: this.state, effects };
@@ -451,7 +486,104 @@ export class DrawingEngine {
   redo() {
     if (!this.redoStack.length) throw new Error("没有可以重做的操作");
     this.undoStack.push(copy(this.state));
+    if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
     this.state = this.redoStack.pop();
     return { state: this.state, effects: [] };
   }
+
+  serializeProject() {
+    return {
+      format: "listen-paint",
+      version: 1,
+      state: copy(this.state),
+      history: { undo: copy(this.undoStack), redo: copy(this.redoStack) }
+    };
+  }
+
+  loadProject(project) {
+    const loaded = validateProject(project);
+    this.state = loaded.state;
+    this.undoStack = loaded.history.undo;
+    this.redoStack = loaded.history.redo;
+    return { state: this.state, effects: [] };
+  }
+}
+
+function validateState(state) {
+  if (!isRecord(state)) throw new Error("工程状态无效");
+  const required = ["objects", "selection", "background", "counters", "lastCreated", "nextId", "groups", "nextGroupId"];
+  if (Object.keys(state).some(key => !required.includes(key)) || required.some(key => !(key in state))) throw new Error("工程状态字段无效");
+  if (!Array.isArray(state.objects) || !Array.isArray(state.selection) || !Array.isArray(state.lastCreated)) throw new Error("工程对象结构无效");
+  validateColor(state.background, false);
+  if (!isRecord(state.counters) || !isRecord(state.groups) || !Number.isSafeInteger(state.nextId) || state.nextId < 1
+    || !Number.isSafeInteger(state.nextGroupId) || state.nextGroupId < 1) throw new Error("工程计数器无效");
+  for (const [kind, count] of Object.entries(state.counters)) {
+    if (!KINDS.has(kind) || !Number.isSafeInteger(count) || count < 0) throw new Error("工程图形计数器无效");
+  }
+  const ids = new Set();
+  const names = new Set();
+  const maxNameIndexes = {};
+  let maxShapeId = 0;
+  for (const object of state.objects) {
+    if (!isRecord(object)) throw new Error("工程图形无效");
+    const fields = new Set(["id", "name", "kind", "x", "y", "width", "height", "fill", "stroke", "strokeWidth", "opacity", "rotation", "text", "groupId"]);
+    if (Object.keys(object).some(key => !fields.has(key)) || !isProjectId(object.id, SHAPE_ID_PATTERN)
+      || !isProjectString(object.name) || ids.has(object.id) || names.has(object.name)
+      || (object.groupId !== undefined && object.groupId !== null && !isProjectId(object.groupId, GROUP_ID_PATTERN))) {
+      throw new Error("工程图形 ID 或字段无效");
+    }
+    validateAction({ type: "create", kind: object.kind, x: object.x, y: object.y, width: object.width, height: object.height,
+      fill: object.fill, stroke: object.stroke, strokeWidth: object.strokeWidth, opacity: object.opacity,
+      rotation: object.rotation, text: object.text });
+    const nameIndex = generatedNameIndex(object.kind, object.name);
+    if (nameIndex === null) throw new Error("工程图形名称无效");
+    maxNameIndexes[object.kind] = Math.max(maxNameIndexes[object.kind] || 0, nameIndex);
+    maxShapeId = Math.max(maxShapeId, projectIdNumber(object.id));
+    ids.add(object.id);
+    names.add(object.name);
+  }
+  if (state.nextId <= maxShapeId) throw new Error("工程图形 ID 计数器无效");
+  for (const [kind, maxNameIndex] of Object.entries(maxNameIndexes)) {
+    if ((state.counters[kind] || 0) < maxNameIndex) throw new Error("工程图形命名计数器无效");
+  }
+  for (const value of [...state.selection, ...state.lastCreated]) if (!ids.has(value)) throw new Error("工程对象引用无效");
+  const groupNames = new Set();
+  const groupedMembers = new Set();
+  let maxGroupId = 0;
+  for (const [groupId, group] of Object.entries(state.groups)) {
+    const fields = new Set(["id", "name", "members"]);
+    if (!isRecord(group) || Object.keys(group).some(key => !fields.has(key))
+      || !isProjectId(groupId, GROUP_ID_PATTERN) || group.id !== groupId || !isProjectString(group.name)
+      || groupNames.has(group.name) || !Array.isArray(group.members) || group.members.length < 2
+      || new Set(group.members).size !== group.members.length
+      || group.members.some(id => !isProjectId(id, SHAPE_ID_PATTERN) || !ids.has(id) || groupedMembers.has(id))) {
+      throw new Error("工程组合引用无效");
+    }
+    maxGroupId = Math.max(maxGroupId, projectIdNumber(groupId));
+    groupNames.add(group.name);
+    group.members.forEach(id => groupedMembers.add(id));
+  }
+  if (state.nextGroupId <= maxGroupId) throw new Error("工程组合 ID 计数器无效");
+  for (const object of state.objects) {
+    if (object.groupId && (!state.groups[object.groupId] || !state.groups[object.groupId].members.includes(object.id))) {
+      throw new Error("工程组合引用无效");
+    }
+    if (!object.groupId && groupedMembers.has(object.id)) throw new Error("工程组合引用无效");
+  }
+  return copy(state);
+}
+
+export function validateProject(project) {
+  if (!isRecord(project) || project.format !== "listen-paint" || project.version !== 1
+    || !isRecord(project.history) || !Array.isArray(project.history.undo) || !Array.isArray(project.history.redo)
+    || project.history.undo.length > HISTORY_LIMIT || project.history.redo.length > HISTORY_LIMIT
+    || Object.keys(project).some(key => !["format", "version", "state", "history"].includes(key))
+    || Object.keys(project.history).some(key => !["undo", "redo"].includes(key))) throw new Error("工程格式或版本无效");
+  return {
+    state: validateState(project.state),
+    history: {
+      undo: project.history.undo.map(validateState),
+      redo: project.history.redo.map(validateState)
+    }
+  };
 }

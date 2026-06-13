@@ -252,9 +252,7 @@ def validate_change_value(field, value):
 
 def validate_action(action):
     action_type = action["type"]
-    # Fields prefixed with "_" are browser-side metadata (e.g. _compositeId)
-    # and are exempt from the allowed-fields whitelist.
-    unknown = {k for k in action if not k.startswith("_")} - ACTION_FIELDS[action_type]
+    unknown = set(action) - ACTION_FIELDS[action_type]
     if unknown:
         raise ValueError(f"{action_type} 包含不允许的字段 {next(iter(unknown))}")
     if action_type == "create":
@@ -570,6 +568,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 text = transcribe_audio(audio, self.headers.get("Content-Type", ""))
                 self.send_json(200, {"text": text})
                 return
+            if length <= 0:
+                raise ValueError("请求内容为空")
             if length > 100_000:
                 raise ValueError("请求过大")
             body = json.loads(self.rfile.read(length).decode("utf-8"))

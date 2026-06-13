@@ -5,6 +5,10 @@ import { chineseNumber, decomposeComposite, normalizeText, parseCommand, splitCo
 test("中文数字与常见识别文本归一化", () => {
   assert.equal(chineseNumber("五十"), 50);
   assert.equal(chineseNumber("一百二十"), 120);
+  assert.equal(chineseNumber("两百五"), 250);
+  assert.equal(chineseNumber("三千零六"), 3006);
+  assert.equal(chineseNumber("一百二十三"), 123);
+  assert.equal(chineseNumber("错误"), null);
   assert.match(normalizeText("撤消，正中央"), /撤销.*中央/);
 });
 
@@ -360,4 +364,27 @@ test("纯复合指令仍然独立工作", () => {
   assert.equal(parseCommand("画一个笑脸").length, 4);
   assert.equal(parseCommand("画一排五个圆").length, 5);
   assert.equal(parseCommand("画一列三个矩形").length, 3);
+});
+
+test("按类型选择保留中文类型目标且所有图形仍为 all", () => {
+  assert.equal(parseCommand("选择所有圆形")[0].target, "圆形");
+  assert.equal(parseCommand("选择全部矩形")[0].target, "矩形");
+  assert.equal(parseCommand("选择所有图形")[0].target, "all");
+});
+
+test("一排一列在画布内等间距且超上限明确拒绝", () => {
+  for (const [command, axis, limit] of [
+    ["画一排二十个圆", "x", 1000],
+    ["画一列二十个矩形", "y", 700]
+  ]) {
+    const actions = parseCommand(command);
+    assert.equal(actions.length, 20);
+    assert.ok(actions.every(action => action.width > 0 && action.height >= 0));
+    assert.ok(actions.every(action => action.x >= 0 && action.y >= 0
+      && action.x + action.width <= 1000 && action.y + action.height <= 700));
+    const gaps = actions.slice(1).map((action, index) => action[axis] - actions[index][axis]);
+    assert.ok(gaps.every(gap => Math.abs(gap - gaps[0]) < 1e-8));
+    assert.ok(actions.at(-1)[axis] < limit);
+  }
+  assert.throws(() => parseCommand("画一排二十一 个圆".replace(" ", "")), /不能超过 20/);
 });

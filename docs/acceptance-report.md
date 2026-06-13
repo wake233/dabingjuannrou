@@ -2,183 +2,95 @@
 
 ## 任务目标
 
-实施 PLAN.md 中的 **阶段 5：离线识别 (Offline Recognition)**，包含三个子任务：
-
-- **Task 5.1** — Vosk.js WASM 集成：启用离线中文语音识别，创建 VoskRecognizer 封装模块
-- **Task 5.2** — 离线模式 UI：三种识别模式的视觉指示和切换
-- **Task 5.3** — 离线模型托管：模型下载说明和项目配置
+完整执行 `PLAN_V2.md` 的第二版计划：按依赖顺序完成 P0-P3，建立 P4 真实环境验收材料，并尽可能执行自动化验收。真实麦克风、Chrome/Edge 长时人工验收不得以 mock 或代码检查伪造通过。
 
 ## 验收标准
 
 | ID | 验收要求 | 验收方法 | 通过条件 | 状态 | 证据 |
 | --- | --- | --- | --- | --- | --- |
-| 5.1.1 | `vosk_recognizer.js` 导出 `createVoskRecognizer` 工厂函数和 `checkModelAvailability`/`downloadModel`/`deleteModel` API | 代码检查 `static/vosk_recognizer.js` + 测试 | 模块导出完整公共 API | 通过 | export createVoskRecognizer, checkModelAvailability, downloadModel, deleteModel, VoskRecognizer |
-| 5.1.2 | VoskRecognizer 实例暴露 `start()`/`stop()`/`feedAudio()`/`isReady()`/`getStatus()` 方法 | 代码检查 `static/vosk_recognizer.js` | 实例方法完整实现 | 通过 | VoskRecognizer 类含 start/stop/feedAudio/isReady/getStatus/destroy/init 方法 |
-| 5.1.3 | 当真实模型不可用时，`isReady()` 返回 false，状态为 'unavailable' | `node --test tests/app.test.js` | 测试验证无模型时优雅降级 | 通过 | "createVoskRecognizer 返回具有完整 API 的实例" + "VoskRecognizer getStatus 返回正确状态字符串" |
-| 5.1.4 | `app.js` 新增 `voiceMode` 三态（"offline"/"cloud"/"browser"）支持 | 代码检查 `static/app.js` | voiceMode 默认值为 "cloud"，支持三态切换 | 通过 | voiceMode 变量 + getVoiceMode()/switchVoiceMode() 导出函数 |
-| 5.1.5 | `setupVoice()` 优先检测 Vosk 模型，降级链：离线 → 云端 → 浏览器 | 代码检查 `static/app.js` + 测试 | 启动时按优先级选择模式 | 通过 | setupVoice() 中 checkModelAvailability() + switchVoiceMode 切换离线失败自动回退 cloud |
-| 5.1.6 | `startOfflineListening()` 正确路由音频到 Vosk recognizer | 代码检查 `static/app.js` | AudioContext → AnalyserNode → Vosk feedAudio() | 通过 | monitorOfflineAudio() 中 analyser.getByteTimeDomainData → Float32Array → voskRecognizer.feedAudio() |
-| 5.1.7 | `stopOfflineListening()` 停止 Vosk recognizer 并清理音频节点 | 代码检查 `static/app.js` | 正确停止和清理 | 通过 | stopOfflineCapture() 调用 voskRecognizer.stop() + clearInterval + releaseCloudResources() |
-| 5.1.8 | `switchVoiceMode(mode)` 在三种模式间切换并重启聆听 | 代码检查 `static/app.js` + 测试 | 切换后正确重启或停止 | 通过 | "switchVoiceMode 可在模式间切换" 测试通过 |
-| 5.1.9 | `pauseVoiceInput()` 和 `resumeVoiceInput()` 支持离线模式 | 代码检查 `static/app.js` | 离线模式下正确暂停/恢复 | 通过 | pauseVoiceInput 调用 stopOfflineCapture(); resumeVoiceInput 调用 startOfflineListening() |
-| 5.2.1 | index.html 添加模式指示器显示三种模式 | 代码检查 `static/index.html` | 三种模式视觉指示器存在 | 通过 | `<div id="mode-indicator" class="mode-indicator">` |
-| 5.2.2 | index.html 添加模式切换按钮 | 代码检查 `static/index.html` | 模式切换按钮存在且绑定事件 | 通过 | `<button id="mode-switch-button" class="mode-switch">` + setupVoice 中 onclick |
-| 5.2.3 | index.html 添加模型下载进度条（默认隐藏） | 代码检查 `static/index.html` | 下载进度条元素存在 | 通过 | `<div id="download-progress">` 含 fill + text 子元素，默认 hidden |
-| 5.2.4 | 三种模式在 UI 上有视觉区分 | 代码检查 `static/styles.css` | 模式指示器样式清晰区分三种状态 | 通过 | .mode-indicator 含背景色/圆角/字体样式 |
-| 5.2.5 | 下载进度条有样式定义 | 代码检查 `static/styles.css` | 进度条样式完整 | 通过 | .download-progress + .download-progress-fill 含完整样式定义 |
-| 5.3.1 | `static/vosk/README.md` 包含清晰模型设置说明 | 代码检查 `static/vosk/README.md` | 说明包含下载 URL、放置方法、配置步骤 | 通过 | README 含模型 URL、两种配置方式、目录结构、故障排除 |
-| 5.3.2 | `.gitignore` 排除模型文件但保留 README.md | 代码检查 `.gitignore` | vosk 目录下模型文件被忽略 | 通过 | `static/vosk/vosk-model-*/` + `!static/vosk/README.md` |
-| 5.3.3 | 项目 `README.md` 更新离线模式配置说明 | 代码检查 `README.md` | README 包含离线模式章节 | 通过 | 新增 "离线语音识别（可选）" 章节，含启用方式、降级链、限制说明 |
-| 5.4 | 所有已有测试依然通过（零回归） | `node --test tests/*.test.js` + `python -m unittest` | 95 JS + 18 Python = 113 全通过 | 通过 | 零回归，82 原测试 + 13 新测试 = 95 JS 全通过 |
-| 5.5 | 新增 Vosk 集成测试（使用 mock） | `node --test tests/app.test.js` | 新增测试覆盖离线模式核心路径 | 通过 | 13 个新测试覆盖 API 导出、生命周期、mock 识别、模式切换、状态报告 |
+| P0.1 | 复合创建后的 `last`/“它”指向全部组件，普通连续创建不合并，整句仅一条历史 | Node 执行级测试 | 房子移动、雪人复制、排列对齐真实状态正确且一次撤销全部回退 | 通过 | `tests/model.test.js` 执行级断言 |
+| P0.2 | 浏览器仅接受正整数 `_compositeId`，服务端模型动作拒绝全部 `_` 字段，风险确认按复合语义计数 | Node/Python 测试 | 非法元数据均拒绝，本地复合仍可执行且不误触发确认 | 通过 | 元数据测试与共享向量 |
+| P0.3 | 导出副本无选择高亮/预览，零线宽保留，`/api/parse` 拒绝无效长度 | Node/Python 测试 | SVG/PNG 源不含 `selection-glow`；线宽为 0；缺失/零/负长度快速报错 | 通过 | app/model/server 新增测试 |
+| P0.4 | 普通 UI/语音无法进入或下载离线模式，实验模块保留 | 页面检查 + Node 测试 | 模式仅 cloud/browser，Vosk mock 测试继续通过，文档明确范围 | 通过 | 本地页面检查离线按钮数为 0；Vosk 测试通过 |
+| P1.1 | 云端失败需确认后降级，选项只展示真实可用模式，状态提示一致且无重复监听 | Node 状态机测试 | 不静默降级；浏览器不可用时无浏览器选项；确认后恢复监听 | 通过 | `tests/app.test.js` |
+| P1.2 | 仅持久化并恢复 cloud/browser，非法旧值安全回退 | Node 状态机测试 | 刷新/唤醒恢复有效模式；offline/非法值不会进入不可用状态 | 通过 | localStorage 状态机与离线拒绝测试 |
+| P1.3 | 云端/浏览器切换与模式查询均有语音入口 | Node 测试 | 两种模式可切换；查询不改变模式或画布；无离线语音入口 | 通过 | `tests/app.test.js` |
+| P2.1 | 本地规则支持按中文类型选择，`all` 行为不变 | Node 解析与执行测试 | 三圆两矩形仅选三圆；不存在类型时原子失败 | 通过 | parser/model 测试 |
+| P2.2 | 一排/一列最多 20 个对象完整位于 1000×700 内并等间距 | Node 测试 | 无负尺寸、无越界、保持等间距 | 通过 | 20 对象边界测试 |
+| P2.3 | 中文数字支持自然十百千组合并拒绝超动作上限排列 | Node 测试 | 一百二十、两百五、三千零六正确；超 20 明确失败 | 通过 | parser 数字与超限测试 |
+| P2.4 | 前后端动作验证公共向量一致，服务端对模型输入更严格 | Node/Python 共享向量测试 | 公共动作同收同拒；仅 `_compositeId` 差异明确 | 通过 | `tests/action_vectors.json`；服务端额外拒绝元数据 |
+| P3.1 | 组合成为稳定命名的一等目标，维护引用并纳入历史 | Node 模型测试 | “组合一”可整体选择/移动/复制/删除；撤销重做完整；无悬挂引用 | 通过 | `tests/model.test.js` |
+| P3.2 | 带版本工程格式安全保存/加载完整状态与历史 | Node 测试 | 往返恢复；损坏/恶意/未知版本拒绝且当前画布不变 | 通过 | 往返、恶意字段、引用与计数器测试 |
+| P3.2-R1 | group 记录只允许 `id/name/members`，严格验证名称、ID 和成员引用 | Node 原子拒绝测试 | `onclick`、URL、未知字段和非法组合结构均拒绝且当前工程不变 | 通过 | `tests/model.test.js` 恶意组合载荷原子拒绝测试 |
+| P3.2-R2 | 聚焦审计同一工程格式验证链路的明显未知字段放行 | 代码审计 + Node 测试 | project/history/state/object/group 均有字段白名单，工程 ID 和名称边界受校验 | 通过 | `static/model.js` 五层字段与 ID/名称边界审计 |
+| P3.2-R3 | 加载工程的 next ID、kind counters 与历史栈满足生成规则和 50 步上限 | Node 原子拒绝测试 | 重复 ID/名称风险及超长历史工程均拒绝且当前工程不变 | 通过 | `tests/model.test.js` 计数器与历史上限原子拒绝测试 |
+| P3.3 | 自动保存仅在成功提交后更新，启动安全恢复，支持语音丢弃 | Node app 测试 | 成功状态可恢复；失败事务不覆盖；损坏存档不阻塞；可语音丢弃 | 通过 | `tests/app.test.js` |
+| P4.1 | 建立真实语音与导出验收矩阵 | 文档检查 | `docs/voice-acceptance.md` 含环境、20 指令、延迟、稳定性、导出矩阵 | 通过 | `docs/voice-acceptance.md` |
+| P4.2 | Chrome/Edge、真实麦克风和 30 分钟指标实测 | 人工真实环境验收 | 达到 `PLAN_V2.md` 的准确率、延迟、唤醒与稳定性门槛 | 阻塞 | 当前自动化环境无真实麦克风与人工长时交互 |
+| REG.1 | 全量自动测试无回归 | 全量命令 | Node 与 Python 全部通过 | 通过 | Node 121/121；Python 25/25；smoke 12/12 |
+| DOC.1 | README、DESIGN、PLAN 对第二版能力与离线范围一致 | 文档检查 | 无把真实离线识别描述为已交付的内容 | 通过 | README、DESIGN、Vosk README 已同步；保留用户 `PLAN_V2.md` 修改 |
 
 ## 实施记录
 
-### 第 1 轮 — 实施 Phase 5 全部任务
+### 第 1 轮：建立验收基线
 
-**完成的改动：**
+- 完成的改动：将旧阶段 5 报告替换为第二版 P0-P4 验收清单；建立真实环境验收模板。
+- 涉及文件：`docs/acceptance-report.md`、`docs/voice-acceptance.md`
+- 验证结果：验收标准已覆盖正常、边界、失败、回归和人工路径。
+- 未通过项：P0-P3 尚待实现；P4.2 受真实设备与人工时长限制阻塞。
+- 下一步：运行基线测试，按 P0 → P1/P2 → P3 顺序实施。
 
-1. **`static/vosk_recognizer.js`**（新建，约 280 行）：
-   - VoskRecognizer 类：封装 Vosk WASM 识别器生命周期
-   - 公共 API：`createVoskRecognizer({ onPartial, onFinal, onError, onStatus })` 工厂函数
-   - 模型管理：`checkModelAvailability()` / `downloadModel(onProgress)` / `deleteModel()`
-   - IndexedDB 持久化存储（DB: vosk-model-store, store: vosk-models）
-   - Mock 实现：通过 `globalThis.__mockVoskBehavior` 可注入测试行为
-   - 真实 Vosk WASM 初始化桩代码（`_createRealRecognizer()` 含完整注释说明）
-   - 状态报告：'unavailable' | 'downloading' | 'loading' | 'ready' | 'error'
+### 第 2 轮：P0、P1、P2 主链路
 
-2. **`static/app.js`**（修改 10 处）：
-   - 导入 vosk_recognizer 模块
-   - 新增状态变量：`voskRecognizer`, `voskReady`, `voskModelAvailable`
-   - `startOfflineListening()` — 初始化 Vosk 识别器，路由音频到 feedAudio()
-   - `stopOfflineCapture()` / `releaseOfflineResources()` — 清理离线资源
-   - `beginOfflineSegment()` / `monitorOfflineAudio()` / `finishOfflineSegment()` — VAD 驱动的音频段管理
-   - `initVoskIfNeeded()` — 延迟初始化 Vosk 识别器
-   - `switchVoiceMode(mode)` — 三种模式间切换，含自动降级逻辑
-   - `updateModeIndicator()` — 更新模式指示器 UI
-   - `startModelDownload()` — UI 驱动的模型下载（含进度回调）
-   - `getVoiceMode()` / `isVoskReady()` — 导出用于测试
-   - `pauseVoiceInput()` / `resumeVoiceInput()` / `stopListening()` / `returnToWakeWord()` — 增加离线分支
-   - `setupVoice()` — 启动时检查 Vosk 模型可用性，绑定模式切换按钮
-   - `testEnterFullListening()` — 支持 "offline" 模式参数
+- 完成的改动：闭环复合上下文；收紧前后端元数据；清洁导出；保留零线宽；拒绝无效请求长度；隐藏离线入口；确认降级；模式持久化与语音入口；类型选择、排列边界和中文数字。
+- 涉及文件：`static/model.js`、`static/parser.js`、`static/app.js`、`static/index.html`、`main.py` 及对应测试。
+- 验证结果：新增执行级、失败路径和安全边界测试；中途失败均已定位并修复。
+- 失败和修复：旧测试仍期待静默降级/旧组合数组，更新为 V2 行为；修复中文数字零占位与复合“它”引用。
 
-3. **`static/index.html`**（修改 1 处 voice-panel）：
-   - 新增 `#mode-indicator` — 当前识别模式指示器
-   - 新增 `#mode-switch-button` — 模式切换按钮（循环：offline → cloud → browser）
-   - 新增 `#download-model-button` — 模型下载按钮（默认隐藏）
-   - 新增 `#download-progress` / `#download-progress-fill` / `#download-progress-text` — 下载进度条
+### 第 3 轮：P3、安全审查与 P4 材料
 
-4. **`static/styles.css`**（新增约 30 行）：
-   - `.mode-indicator` — 模式指示器样式（圆角、背景色、文本居中）
-   - `.mode-switch` — 切换按钮样式（灰色背景、hover 变深）
-   - `.download-model` — 下载按钮样式（黄色背景、警告色文本）
-   - `.download-progress` / `.download-progress-fill` — 进度条样式（渐变填充、动画过渡）
+- 完成的改动：组合升级为稳定命名对象；带版本工程格式与原子安全加载；自动保存、恢复和语音丢弃；共享验证向量；真实验收矩阵；文档同步。
+- 涉及文件：模型、app、测试、README、DESIGN、`docs/voice-acceptance.md`。
+- 验证结果：本地页面自动检查显示云端模式，离线下载按钮数量为 0；全量自动测试通过。
+- 未通过项：P4.2 真实麦克风、Chrome/Edge 双浏览器与 30 分钟人工验收仍阻塞。
 
-5. **`static/vosk/README.md`**（新建）：
-   - 模型下载 URL 和两种配置方式（应用内自动下载 / 手动本地配置）
-   - 目录结构说明
-   - 模型文件说明表格
-   - 注意事项和故障排除指南
+### 第 4 轮：工程组合载荷复核
 
-6. **`.gitignore`**（更新）：
-   - 新增 `static/vosk/vosk-model-*/` — 排除模型目录
-   - 新增 `static/vosk/*.zip` — 排除模型压缩包
-   - 新增 `static/vosk/*.wasm` / `static/vosk/*.js` — 排除 WASM 模块文件
-   - 保留 `!static/vosk/README.md` — 不排除说明文件
+- 复核缺口：`validateState` 校验组合引用关系，但未对 `state.groups[groupId]` 执行字段白名单，包含 `onclick`、URL 或其他任意字段的组合记录会被加载。
+- 聚焦审计：工程、历史、状态和图形对象已有未知字段白名单；同一路径的工程 ID/名称此前无长度与格式约束。另观察到历史栈未验证 50 步上限、`nextId`/`nextGroupId` 可与已加载 ID 冲突，但二者不是未知字段放行，本轮按聚焦要求不扩展工程格式语义。
+- 已完成改动：group 记录严格限制为 `id/name/members`；group/shape ID 必须使用当前工程格式且长度不超过 100；图形与组合名称不能为空且长度不超过 100；组合成员 ID 同步执行格式和引用校验。
+- 聚焦范围结论：project、history、state、object 原有未知字段白名单有效；历史栈上限与 next ID 一致性不属于本次未知字段放行缺口，未扩展工程格式语义。
+- 新增证据：恶意组合测试覆盖 `onclick`、URL、非法 group ID、超长名称和伪协议 shape ID，每次拒绝后当前工程保持不变。
+- 阶段验证：`node --test tests/model.test.js` 通过，19/19。
+- 全量验证：Node 120/120、Python 25/25、smoke 12/12 全部通过；`git diff --check` 通过，仅输出工作区 LF/CRLF 转换提示，无空白错误。
 
-7. **`README.md`**（更新）：
-   - 新增 "离线语音识别（可选）" 章节
-   - 说明三种模式的启用方式和切换方法
-   - 降级链说明（离线 → 云端 → 浏览器）
-   - 限制说明（准确率、模型大小、浏览器数据清除影响）
+### 第 5 轮：工程生成计数与历史上限闭环
 
-8. **`tests/app.test.js`**（新增 13 个测试）：
-   - 模块 API 导出验证
-   - VoskRecognizer 实例 API 完整性
-   - checkModelAvailability 无 IndexedDB 时返回 available:false
-   - feedAudio 接受 Float32Array
-   - start/stop 安全处理
-   - mock 行为产生最终结果
-   - mock 行为产生中间结果
-   - getStatus 返回正确状态字符串
-   - switchVoiceMode / getVoiceMode / isVoskReady 导出
-   - getVoiceMode 初始值
-   - switchVoiceMode 模式切换
-   - 模式切换后 UI 指示器更新
-   - isVoskReady 在无模型时返回 false
-
-**涉及文件**：
-- `static/vosk_recognizer.js` (NEW)
-- `static/app.js` (MODIFIED)
-- `static/index.html` (MODIFIED)
-- `static/styles.css` (MODIFIED)
-- `static/vosk/README.md` (NEW)
-- `.gitignore` (MODIFIED)
-- `README.md` (MODIFIED)
-- `tests/app.test.js` (MODIFIED)
-
-**验证结果**：全部 113 测试通过（95 JS + 18 Python），零回归。
+- 验收目标：`nextId`/`nextGroupId` 必须大于已有对应 ID 的最大安全整数后缀；各 kind counter 必须覆盖现有同类对象的自动命名序号；undo/redo 各自不得超过既定 50 步。
+- 命名校验规则：现有对象名称必须符合当前不可重命名的“类型名 + `chineseIndex(序号)`”生成规则，counter 不小于同类现有对象的最大生成序号，从而避免后续自动名称冲突。
+- 原子性要求：任一当前状态或历史状态损坏、任一历史栈超限时，工程加载整体拒绝且当前画布与历史保持不变。
+- 已完成改动：加载时解析并比较安全整数 ID 后缀；验证图形名称生成序号与 kind counter；undo/redo 各自限制为 50 步；运行时 redo 也维持同一历史上限。
+- 新增测试：拒绝冲突 next shape/group ID、低 kind counter、未覆盖自动名称、51 步 undo/redo；每次拒绝后工程保持不变；删除形成的合法编号空洞仍可通过。
+- 阶段验证：`node --test tests/model.test.js` 通过，20/20。
+- 全量验证：Node 121/121、Python 25/25、smoke 12/12 全部通过；`git diff --check` 通过，仅输出工作区 LF/CRLF 转换提示，无空白错误。
 
 ## 测试结果
 
 | 命令或检查方法 | 结果 | 关键输出 |
 | --- | --- | --- |
-| `node --test tests/app.test.js` | 52/52 通过 | 原 39 + 新 13 (Vosk tests) |
-| `node --test tests/parser.test.js` | 30/30 通过 | 零回归 |
-| `node --test tests/model.test.js` | 13/13 通过 | 零回归 |
-| `node --test tests/*.test.js` (全量) | 95/95 通过 | 零失败，零取消 |
-| `python -m unittest discover -s tests -p "test_*.py" -v` | 18/18 通过 | 零失败 |
-
-### 新增测试详情
-
-**app.test.js 新增 (13 个 Vosk 相关测试):**
-
-1. `vosk_recognizer 模块导出 createVoskRecognizer API` — 验证模块导出的公共 API 完整性
-2. `createVoskRecognizer 返回具有完整 API 的实例` — 验证实例方法 start/stop/feedAudio/isReady/getStatus/destroy/init
-3. `checkModelAvailability 在无 IndexedDB 时返回 available:false` — 降级行为验证
-4. `VoskRecognizer feedAudio 接受 Float32Array 数据` — 音频数据接口验证
-5. `VoskRecognizer start/stop 在未就绪时安全处理` — 错误处理（emit onError，不抛出）
-6. `VoskRecognizer 使用 mock 行为产生最终结果` — mock simulateResult 完整流程
-7. `VoskRecognizer 使用 mock 产生中间结果` — mock simulatePartial 完整流程
-8. `VoskRecognizer getStatus 返回正确状态字符串` — 状态 report 验证
-9. `app.js 导出 switchVoiceMode 和 getVoiceMode 函数` — 公开 API 验证
-10. `getVoiceMode 初始返回 cloud` — 默认模式验证
-11. `switchVoiceMode 可在模式间切换` — 三态切换 + 离线降级验证（模型不可用时自动回退 cloud）
-12. `模式切换后 UI 指示器更新` — UI 指示器联动验证
-13. `isVoskReady 在无模型时返回 false` — ready 状态验证
+| 基线 `node --test tests/*.test.js` | 通过 | 109/109 |
+| 基线 Python unittest | 通过 | 23/23 |
+| 最终 `node --test tests/*.test.js` | 通过 | 121/121 |
+| 最终 `python -m unittest discover -s tests -p "test_*.py" -v` | 通过 | 25/25 |
+| `node tests/smoke_test.mjs` | 通过 | 12/12 |
+| `git diff --check` | 通过 | 无空白错误 |
+| 本地页面入口检查 | 通过 | `modeText=🌐 云端`，`offlineButtons=0` |
 
 ## 最终结论
 
-**全部 19 条验收标准均已通过。**
-
-阶段 5（离线识别）的三个子任务全部完成：
-
-- **Task 5.1**：Vosk.js WASM 集成层已创建。`vosk_recognizer.js` 提供完整的识别器封装，支持 IndexedDB 模型持久化、mock 测试注入、真实 Vosk WASM 集成桩代码。`app.js` 已新增离线语音模式分支，完整实现音频路由（getUserMedia → AudioContext → AnalyserNode → Float32Array → Vosk feedAudio）和 VAD 驱动的音频段管理。降级链（离线 → 云端 → 浏览器）在启动和切换时均自动生效。
-
-- **Task 5.2**：离线模式 UI 已完成。模式指示器实时显示当前识别模式（🌐 云端 / 💻 离线 / 🌐↓ 浏览器），模式切换按钮循环切换三种模式，离线模式不可用时自动提示下载并回退云端。下载进度条提供实时反馈。
-
-- **Task 5.3**：离线模型托管已配置。`static/vosk/README.md` 提供完整的模型下载和配置说明，`.gitignore` 排除大模型文件但保留说明文档，项目 `README.md` 新增离线模式章节。
-
-**代码质量**：
-- 离线识别模块设计为完全可测试（通过 mock 注入），不与真实 Vosk WASM 模块强耦合
-- 模式切换函数（`switchVoiceMode`）保证状态一致性（先停止当前模式 → 切换 → 按需重启）
-- 所有音频资源在模式切换和停止时正确清理（releaseOfflineResources 级联释放）
-- 离线模式下的 VAD 复用现有 `voiceActivityDecision` 逻辑，保持行为一致
+P0-P3 与 P4 验收材料已经完成，全部自动化验收通过。由于 P4.2 真实环境指标未执行，第二版发布门槛整体状态为“人工验收阻塞”，不得宣布候选版本已通过完整发布验收。
 
 ## 残余风险
 
-1. **真实 Vosk WASM 集成未端到端验证**：由于无法在实际环境中加载 42MB Vosk 模型，所有测试基于 mock 实现。真实 WASM 集成时可能需要调整：
-   - Vosk WASM 虚拟文件系统的模型路径映射
-   - AudioWorklet 与 Vosk 的音频格式转换（当前假设 16kHz mono Float32Array）
-   - 浏览器兼容性（需要 WebAssembly + AudioWorklet 支持）
-
-2. **IndexedDB 存储限制**：42MB 模型存储在 IndexedDB 中，在部分浏览器（如 Firefox 隐私模式）可能有存储配额限制。当前实现未处理存储满的情况。
-
-3. **模型下载中断恢复**：当前 `downloadModel` 使用 `fetch` 流式读取，但不支持断点续传。如果下载中断，用户需要重新开始。
-
-4. **离线模式准确率**：离线 Vosk 模型（small-cn-0.22）的准确率低于 OpenAI STT。虽然已配置模糊匹配表（FUZZY_MAP），但实际识别效果需在真实环境中验证和调优。
-
-5. **模式切换的瞬态处理**：`switchVoiceMode` 在切换时先停止当前模式再启动新模式，中间可能有短暂的"静默"窗口期。如果用户在此窗口期说话，语音可能丢失。
-
-6. **WASM 模块加载时机**：当前设计在首次使用离线模式时才初始化 Vosk 识别器（延迟加载），首次切换可能有短暂的加载延迟。预加载策略可进一步提升体验（但会增加初始页面加载时间）。
-
+- 真实麦克风识别准确率、Chrome/Edge 兼容性、唤醒词 30 分钟误触发和连续使用 30 分钟稳定性只能由人工真实环境验收。
+- in-app 页面检查不能替代 Chrome 与 Edge 的真实麦克风授权、语音准确率、端到端延迟和导出查看器兼容性。
