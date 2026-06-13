@@ -419,7 +419,10 @@ function startRecognition() {
 }
 
 function updateListeningUi(status) {
-  $("listen-button").classList.toggle("active", listeningWanted);
+  const listenButton = $("listen-button");
+  listenButton.classList.toggle("active", listeningWanted);
+  listenButton.setAttribute("aria-pressed", String(listeningWanted));
+  listenButton.setAttribute("aria-label", listeningWanted ? "停止语音控制" : "开始语音控制");
   $("listen-label").textContent = listeningWanted ? "停止聆听" : "开始聆听";
   $("voice-status").textContent = status || (listeningWanted ? "正在启动" : "已暂停");
 }
