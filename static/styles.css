@@ -532,6 +532,55 @@ blockquote {
   transform: translate(-50%, 0);
 }
 
+.acceptance-panel {
+  margin: 0 24px 30px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.acceptance-heading,
+.acceptance-actions,
+.acceptance-environment {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.acceptance-environment label {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+  flex: 1;
+}
+
+.acceptance-panel input {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.acceptance-panel ol {
+  display: grid;
+  gap: 8px;
+  padding-left: 24px;
+}
+
+.acceptance-panel li {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.acceptance-panel li span {
+  display: block;
+  margin: 4px 0;
+}
+
 @media (max-width: 1100px) {
   .site-header { align-items: flex-start; }
   .voice-panel { width: min(570px, 62%); }

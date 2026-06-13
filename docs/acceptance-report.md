@@ -12,10 +12,10 @@
 | V3-E1 | `/api/parse` 与 `/api/transcribe` 错误保留 `error`，并提供稳定 `errorCode`、`retryable` | Python 单元测试覆盖配置缺失、认证、权限、模型、限流、网络、超时、无效响应、空转写 | 每类错误映射稳定，重试属性正确，旧 `error` 字段保留 | 通过 | `ServiceError` 与 29 项 Python 测试 |
 | V3-E2 | 浏览器统一提示麦克风权限、浏览器能力、API 不可达及云端错误 | Node app 测试与代码检查 | 每类失败显示可理解且一致的状态；云端错误使用服务端分类 | 通过 | `tests/app.test.js` 云端、浏览器能力、麦克风权限测试 |
 | V3-M1 | 浏览器发布只读验收事件，记录提交、转写、命令完成、本地耗时与失败类别，且不保存音频 | Node 测试检查事件顺序和载荷；代码检查 | 事件顺序稳定；载荷不含 Blob、音频或音频内容；普通绘图行为不变 | 通过 | `listen-paint-acceptance` 事件测试；Node 96/96 |
-| V3-A1 | 诊断页保留环境预检并提供验收模式入口 | 页面检查与 smoke | 入口指向主应用 `?acceptance=1`，原预检仍可用 | 待处理 | 待记录 |
-| V3-A2 | `?acceptance=1` 加载独立验收面板，普通模式不显示且不改变现有行为 | Node UI/app 测试与 smoke | 仅验收参数显示面板；共用主应用语音与绘图链路 | 待处理 | 待记录 |
-| V3-A3 | 验收台展示 20 条云端指令并自动记录转写、执行结果、本地与端到端耗时、错误类别 | Node 测试 | 每项均可从只读事件更新，字段完整且结果可人工修正 | 待处理 | 待记录 |
-| V3-A4 | 验收数据仅存当前浏览器，可填写环境、导出 JSON/Markdown并清除 | Node 测试检查持久化、导出、清除 | localStorage 往返成功；报告不含音频；清除后数据消失 | 待处理 | 待记录 |
+| V3-A1 | 诊断页保留环境预检并提供验收模式入口 | 页面检查与 smoke | 入口指向主应用 `?acceptance=1`，原预检仍可用 | 通过 | `static/diagnostic.html` 与 UI 测试 |
+| V3-A2 | `?acceptance=1` 加载独立验收面板，普通模式不显示且不改变现有行为 | Node UI/app 测试与 smoke | 仅验收参数显示面板；共用主应用语音与绘图链路 | 通过 | 动态加载检查；Node 100/100；smoke 12/12 |
+| V3-A3 | 验收台展示 20 条云端指令并自动记录转写、执行结果、本地与端到端耗时、错误类别 | Node 测试 | 每项均可从只读事件更新，字段完整且结果可人工修正 | 通过 | `tests/acceptance.test.js` |
+| V3-A4 | 验收数据仅存当前浏览器，可填写环境、导出 JSON/Markdown并清除 | Node 测试检查持久化、导出、清除 | localStorage 往返成功；报告不含音频；清除后数据消失 | 通过 | 持久化、报告与清除测试 |
 | V3-D1 | README、DESIGN、PLAN_V2 与真实验收文档和当前实现一致 | 文档检查与测试数量核对 | 已完成能力不再列为技术债；仅云端人工矩阵；清空确认描述正确；V2 标为历史 | 待处理 | 待记录 |
 | V3-R1 | 每个实施阶段无自动化回归并独立提交 | 每阶段运行 Node、Python、smoke、`git diff --check`；检查 git log/status | 所有自动检查通过；合理阶段各有独立 commit，无无关改动混入 | 待处理 | 待记录 |
 | V3-H1 | Chrome/Edge 分别完成云端 20 指令、首次授权、TTS 恢复、失败重试、30 分钟使用与导出人工验收 | 真实浏览器、麦克风和人工执行 | 两浏览器各至少 18/20；稳定性、恢复和导出满足门槛 | 阻塞 | 当前自动执行环境无法代替真实人员、麦克风和双浏览器长时交互 |
@@ -39,6 +39,15 @@
 - 阶段验证：Node `96/96`、Python `29/29`、smoke `12/12`、`git diff --check` 通过。
 - 下一步：独立提交本阶段，然后实现 `?acceptance=1` 验收台。
 
+### 第 3 轮：引导式真实语音验收台
+
+- 完成的改动：诊断页增加验收入口；主应用仅在 `?acceptance=1` 动态加载独立面板；面板展示 20 条云端指令，消费主链路只读事件，支持自动记录、人工覆盖、环境信息、本地持久化、JSON/Markdown 导出和清除。
+- 涉及文件：`static/acceptance.js`、`static/app.js`、`static/diagnostic.html`、`static/styles.css`、`tests/acceptance.test.js`、`tests/ui.test.js`
+- 安全与边界：验收记录不含音频；动态文本进行 HTML 转义；普通模式不静态创建验收面板，也不写验收存储。
+- 验证结果：聚焦验收台/UI/app 测试 `46/46` 通过；全量 Node `100/100`、Python `29/29`、smoke `12/12`、`git diff --check` 通过。
+- 未通过项：V3-H1 仍需 Chrome/Edge 真实麦克风人工执行。
+- 下一步：独立提交本阶段，随后收敛 README、DESIGN、PLAN_V2 和真实验收文档。
+
 ## 测试结果
 
 | 命令或检查方法 | 结果 | 关键输出 |
@@ -51,6 +60,10 @@
 | 错误与指标阶段 Python unittest | 通过 | 29/29 |
 | 错误与指标阶段 `node tests/smoke_test.mjs` | 通过 | 12/12 |
 | 错误与指标阶段 `git diff --check` | 通过 | 无空白错误；仅 LF/CRLF 工作区提示 |
+| 验收台阶段 `node --test tests/*.test.js` | 通过 | 100/100 |
+| 验收台阶段 Python unittest | 通过 | 29/29 |
+| 验收台阶段 `node tests/smoke_test.mjs` | 通过 | 12/12 |
+| 验收台阶段 `git diff --check` | 通过 | 无空白错误；仅 LF/CRLF 工作区提示 |
 
 ## 最终结论
 

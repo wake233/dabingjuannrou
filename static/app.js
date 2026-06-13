@@ -560,14 +560,14 @@ export async function transcribeAudio(blob, metrics = {}) {
   } catch (error) {
     console.log("[transcribeAudio] 错误:", error.message);
     const errorCode = error.errorCode || (error instanceof TypeError ? "api_unreachable" : "transcription_failed");
-    showFallbackPrompt(cloudErrorMessage(errorCode, error.message), errorCode, error.retryable === true);
+    showFallbackPrompt(cloudErrorMessage(errorCode, error.message), errorCode, error.retryable === true, metrics.segmentId);
   } finally {
     transcribing = false;
   }
 }
 
-function showFallbackPrompt(reason, errorCode = "cloud_unavailable", retryable = true) {
-  emitAcceptance("error", { errorCode, retryable, message: reason });
+function showFallbackPrompt(reason, errorCode = "cloud_unavailable", retryable = true, segmentId = null) {
+  emitAcceptance("error", { segmentId, errorCode, retryable, message: reason });
   fallbackPending = true;
   releaseCloudResources();
   listeningWanted = false;
@@ -663,3 +663,6 @@ function restoreAutosave() {
 }
 
 restoreAutosave(); render(); setupVoice();
+if (new URLSearchParams(globalThis.location?.search || "").get("acceptance") === "1") {
+  import("./acceptance.js").then(({ setupAcceptancePanel }) => setupAcceptancePanel());
+}
