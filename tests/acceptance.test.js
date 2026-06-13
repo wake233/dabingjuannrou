@@ -25,6 +25,7 @@ function memoryStorage() {
 test("验收台包含 20 条云端标准指令并按指标事件记录结果", () => {
   const state = createAcceptanceState();
   assert.equal(ACCEPTANCE_COMMANDS.length, 20);
+  assert.equal(ACCEPTANCE_COMMANDS[5], "画三个矩形，然后顶部对齐");
   applyAcceptanceEvent(state, { type: "segment-submitted", segmentId: 3 });
   applyAcceptanceEvent(state, { type: "transcription-completed", segmentId: 3, transcript: "画一个红色圆形" });
   applyAcceptanceEvent(state, { type: "command-completed", segmentId: 3, success: true, localDurationMs: 12, endToEndDurationMs: 650 });

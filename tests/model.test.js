@@ -266,7 +266,9 @@ test("复合创建后的上下文作用于全部组件且普通创建不合并",
 
 test("复合创建后的布局操作保留整组选择反馈", () => {
   const engine = new DrawingEngine();
-  engine.execute(parseCommand("画一排三个矩形，然后顶部对齐"));
+  const actions = parseCommand("画三个矩形，然后顶部对齐");
+  assert.equal(new Set(actions.slice(0, 3).map(action => action.y)).size, 3);
+  engine.execute(actions);
 
   assert.equal(engine.state.objects.length, 3);
   assert.equal(engine.state.selection.length, 3);

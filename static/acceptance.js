@@ -1,11 +1,11 @@
-export const ACCEPTANCE_STORAGE_KEY = "listen-paint-acceptance-v1";
+export const ACCEPTANCE_STORAGE_KEY = "listen-paint-acceptance-v2";
 export const ACCEPTANCE_COMMANDS = [
   "画一个红色圆形",
   "画一个蓝色矩形放在右边",
   "画一个文字，写上“你好”放在中央",
   "画一个房子，然后移动到右边",
   "画一个雪人，然后复制它",
-  "画一排三个矩形，然后顶部对齐",
+  "画三个矩形，然后顶部对齐",
   "选择所有圆形",
   "选择所有图形",
   "把它改成绿色",
@@ -24,7 +24,7 @@ export const ACCEPTANCE_COMMANDS = [
 
 export function createAcceptanceState() {
   return {
-    version: 1,
+    version: 2,
     updatedAt: null,
     environment: { browser: "", os: "", microphone: "", network: "", stt: "", operator: "" },
     records: ACCEPTANCE_COMMANDS.map((command, index) => ({
@@ -47,7 +47,7 @@ export function loadAcceptanceState(storage = globalThis.localStorage) {
   if (!stored) return createAcceptanceState();
   try {
     const parsed = JSON.parse(stored);
-    if (parsed?.version !== 1 || !Array.isArray(parsed.records) || parsed.records.length !== ACCEPTANCE_COMMANDS.length) {
+    if (parsed?.version !== 2 || !Array.isArray(parsed.records) || parsed.records.length !== ACCEPTANCE_COMMANDS.length) {
       return createAcceptanceState();
     }
     return parsed;

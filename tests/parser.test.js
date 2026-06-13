@@ -355,6 +355,12 @@ test("复合指令与其他子句混用时正确拆解", () => {
   assert.equal(rowAndAlign.length, 4);
   assert.equal(rowAndAlign[3].type, "align");
   assert.equal(rowAndAlign[3].mode, "top");
+
+  const manyAndAlign = parseCommand("画三个矩形，然后顶部对齐");
+  assert.equal(manyAndAlign.length, 4);
+  assert.equal(new Set(manyAndAlign.slice(0, 3).map(action => action.y)).size, 3);
+  assert.equal(manyAndAlign[3].type, "align");
+  assert.equal(manyAndAlign[3].mode, "top");
 });
 
 test("纯复合指令仍然独立工作", () => {

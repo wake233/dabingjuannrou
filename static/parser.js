@@ -192,6 +192,16 @@ export function decomposeComposite(text) {
     if (kind && count > 20) throw new Error("复合动作数量不能超过 20");
   }
 
+  const manyPattern = /^画([零一二两三四五六七八九十百千\d]+)个(.+)$/;
+  const manyMatch = normalized.match(manyPattern);
+  if (manyMatch) {
+    const count = chineseNumber(manyMatch[1]);
+    const kind = shapeKindFromText(manyMatch[2]);
+    if (kind && count >= 2 && count <= 20) return arrangeComposite(kind, count, "horizontal")
+      .map((action, index) => ({ ...action, y: action.y + ((index % 3) - 1) * 60 }));
+    if (kind && count > 20) throw new Error("复合动作数量不能超过 20");
+  }
+
   return null;
 }
 
