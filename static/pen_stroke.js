@@ -11,10 +11,10 @@ const MAX_NODES_PER_ENTITY = 12000;
 const COORD_BOUND = 100000;
 
 export const LINE_TIERS = Object.freeze({
-  outline:    { width: 1.0, opacity: 0.92, dash: "none",   perturb: 0.008, gapChance: 0.00, label: "outline" },
-  structure:  { width: 0.55, opacity: 0.78, dash: "none",   perturb: 0.014, gapChance: 0.02, label: "structure" },
-  texture:    { width: 0.28, opacity: 0.55, dash: "none",   perturb: 0.022, gapChance: 0.08, label: "texture" },
-  atmosphere: { width: 0.16, opacity: 0.35, dash: "4 6",   perturb: 0.035, gapChance: 0.15, label: "atmosphere" }
+  outline:    { width: 1.0, opacity: 0.92, dash: "none",   perturb: 0.012, gapChance: 0.00, label: "outline" },
+  structure:  { width: 0.55, opacity: 0.78, dash: "none",   perturb: 0.020, gapChance: 0.00, label: "structure" },
+  texture:    { width: 0.28, opacity: 0.55, dash: "none",   perturb: 0.030, gapChance: 0.04, label: "texture" },
+  atmosphere: { width: 0.16, opacity: 0.35, dash: "4 6",   perturb: 0.045, gapChance: 0.08, label: "atmosphere" }
 });
 
 /**
@@ -96,8 +96,25 @@ export function penPath(points, options = {}) {
   const minWidth = options.minWidth || 0.4;
 
   const wp = baseWidth * tier.width * widthScale;
-  const pert = wp * tier.perturb * 2;
   const gapChance = tier.gapChance;
+
+  // Build smooth width variation from seed-derived sine parameters.
+  // This replaces per-point random perturbation with a continuous,
+  // organic "breathing" width that varies naturally along the stroke.
+  const smoothAmp = tier.perturb * 12; // scale perturb into visible width variation
+  const freq1 = 4 + rng() * 10;        // low-frequency undulation (4-14 cycles)
+  const freq2 = 9 + rng() * 18;        // higher-frequency detail (9-27 cycles)
+  const phase1 = rng() * Math.PI * 2;
+  const phase2 = rng() * Math.PI * 2;
+  const amp1 = 0.5 + rng() * 0.5;      // varies 0.5-1.0
+  const amp2 = 0.25 + rng() * 0.35;    // varies 0.25-0.6
+
+  function smoothWidthVariation(t) {
+    // Base breathing wave + detail wave, normalized to preserve mean width near 1.0
+    const w1 = Math.sin(t * Math.PI * freq1 + phase1) * amp1;
+    const w2 = Math.sin(t * Math.PI * freq2 + phase2) * amp2 * 0.5;
+    return 1.0 + (w1 + w2) * smoothAmp;
+  }
 
   // Build smooth centerline with interpolation
   const interpolated = [];
@@ -125,6 +142,9 @@ export function penPath(points, options = {}) {
     tangents.push([next[0] - prev[0], next[1] - prev[1]]);
   }
 
+  // Minimal paper-texture noise factor (under 3% of width, simulating paper grain)
+  const textureNoise = wp * 0.025;
+
   // Generate left and right offset points
   const left = [];
   const right = [];
@@ -132,18 +152,20 @@ export function penPath(points, options = {}) {
 
   for (let i = 0; i < n; i += 1) {
     const t = i / (n - 1);
-    const w = Math.max(minWidth, wp * widthFn(t));
+    const userW = widthFn(t);
+    const breathW = smoothWidthVariation(t);
+    const w = Math.max(minWidth, wp * userW * breathW);
     const [tx, ty] = tangents[i];
     const len = Math.sqrt(tx * tx + ty * ty) || 1;
 
-    // Perturb
-    const px = pert * (rng() - 0.5);
-    const py = pert * (rng() - 0.5);
+    // Minimal random texture grain (under 3% — simulates paper surface)
+    const grainX = textureNoise * (rng() - 0.5);
+    const grainY = textureNoise * (rng() - 0.5);
 
-    const lx = interpolated[i][0] + (-ty / len) * w + px;
-    const ly = interpolated[i][1] + (tx / len) * w + py;
-    const rx = interpolated[i][0] + (ty / len) * w + px;
-    const ry = interpolated[i][1] + (-tx / len) * w + py;
+    const lx = interpolated[i][0] + (-ty / len) * w + grainX;
+    const ly = interpolated[i][1] + (tx / len) * w + grainY;
+    const rx = interpolated[i][0] + (ty / len) * w + grainX;
+    const ry = interpolated[i][1] + (-tx / len) * w + grainY;
 
     left.push([clamp(lx), clamp(ly)]);
     right.push([clamp(rx), clamp(ry)]);

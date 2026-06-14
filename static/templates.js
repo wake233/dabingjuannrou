@@ -6,13 +6,31 @@ import {
 
 const NS = "http://www.w3.org/2000/svg";
 
+// Warm storybook palette — designed for children's picture-book illustration.
+// Colours are deliberately warm, vibrant, and visually distinct from one another.
 const PALETTE = Object.freeze({
-  ink: "#46505e", deepInk: "#303946", warm: "#d98f70", rose: "#c97b84",
-  gold: "#e8c47c", green: "#86a886", moss: "#657f6a", blue: "#88a9bd",
-  deepBlue: "#617f96", night: "#596780", paper: "#f4ead7", cream: "#fff8e9",
-  skin: "#efc5a5", skinShadow: "#d4a78a", wood: "#8b6914", brick: "#c17a5e",
-  waterLight: "#a8d4e6", waterDark: "#5c8a9e", foliage: "#5a7a4a",
-  foliageDark: "#3d5432", stone: "#9e9e8e", stoneDark: "#6e6e60"
+  ink: "#4a3f35",        // warm deep brown (replaces cold blue-grey)
+  deepInk: "#2e251e",    // darker warm brown for weight-bearing outlines
+  warm: "#d4745c",       // warm terracotta / brick red
+  rose: "#d48494",       // soft rose pink
+  gold: "#d4a843",       // warm amber gold
+  green: "#6b9b5a",      // lively mid-green
+  moss: "#7a8e5a",       // yellow-tinged moss green
+  blue: "#6b9fc4",       // clear sky blue
+  deepBlue: "#4a6fa5",   // rich deep blue
+  night: "#3a4460",       // warm-tinted dark blue-black
+  paper: "#f5eee0",       // warm cream paper
+  cream: "#fffcf0",       // soft warm white
+  skin: "#f0c8a8",        // natural warm skin (slightly pink)
+  skinShadow: "#d4a78a",  // skin shadow tone
+  wood: "#8b6b3c",        // warm brown wood
+  brick: "#c47a5e",       // warm brick red
+  waterLight: "#8cc8e0",  // clear blue-green water
+  waterDark: "#4a8a9e",   // deeper water tone
+  foliage: "#5a7a3a",     // vivid leaf green
+  foliageDark: "#3d5428", // deep foliage shadow
+  stone: "#9e9688",       // warm grey-brown stone
+  stoneDark: "#6e6658"    // darker stone
 });
 
 const DEFAULT_COLORS = Object.freeze({
@@ -44,9 +62,20 @@ function repeat(group, count, create) {
 }
 
 function shade(hex, amount) {
+  // Scale small amounts to produce visible colour shifts across the palette.
+  const effective = Math.sign(amount) * Math.max(Math.abs(amount), Math.abs(amount) < 15 ? Math.abs(amount) * 1.6 : Math.abs(amount));
   const v = Number.parseInt(hex.slice(1), 16);
-  const c = (ch) => Math.max(0, Math.min(255, ch + amount));
+  const c = (ch) => Math.max(0, Math.min(255, ch + effective));
   return `#${[v >> 16, (v >> 8) & 255, v & 255].map(ch => c(ch).toString(16).padStart(2, "0")).join("")}`;
+}
+
+// Grammar category helper — maps templateId to figure/structure/nature/atmosphere.
+function grammarCategory(templateId) {
+  if (["person", "cat", "dog", "bird"].includes(templateId)) return "figure";
+  if (["house", "roof", "bridge", "boat", "bench", "bicycle", "fence", "buildings", "streetlamp", "umbrella", "street"].includes(templateId)) return "structure";
+  if (["tree", "mountain", "flowers", "grass", "river", "puddle"].includes(templateId)) return "nature";
+  if (["rain", "cloud", "sun", "moon", "stars"].includes(templateId)) return "atmosphere";
+  return "structure";
 }
 
 function alpha(hex, a) {
@@ -252,17 +281,18 @@ function renderPerson(entity, quality, namespace) {
     { tier: "outline", baseWidth: sw * 0.8, stroke: ink, rng });
   penLineToGroup(group, [[rShX, shY], [rElbX + w * 0.01, rElbY - h * 0.01], [rElbX, rElbY], [rElbX - w * 0.01, rElbY + h * 0.01], [rHndX, rHndY]],
     { tier: "outline", baseWidth: sw * 0.8, stroke: ink, rng });
+  // Hands (visible at base quality for recognition)
+  penLineToGroup(group, [[lHndX - w * 0.02, lHndY - h * 0.01], [lHndX + w * 0.02, lHndY + h * 0.01]],
+    { tier: "structure", baseWidth: sw * 0.5, stroke: PALETTE.skin, rng });
+  penLineToGroup(group, [[rHndX - w * 0.02, rHndY - h * 0.01], [rHndX + w * 0.02, rHndY + h * 0.01]],
+    { tier: "structure", baseWidth: sw * 0.5, stroke: PALETTE.skin, rng });
+
   if (isFull) {
     // Elbow joint lines
     penLineToGroup(group, [[lElbX - w * 0.015, lElbY - h * 0.015], [lElbX + w * 0.015, lElbY + h * 0.01]],
       { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.deepInk, rng });
     penLineToGroup(group, [[rElbX + w * 0.015, rElbY - h * 0.015], [rElbX - w * 0.015, rElbY + h * 0.01]],
       { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.deepInk, rng });
-    // Hands
-    penLineToGroup(group, [[lHndX - w * 0.02, lHndY - h * 0.01], [lHndX + w * 0.02, lHndY + h * 0.01]],
-      { tier: "structure", baseWidth: sw * 0.5, stroke: PALETTE.skin, rng });
-    penLineToGroup(group, [[rHndX - w * 0.02, rHndY - h * 0.01], [rHndX + w * 0.02, rHndY + h * 0.01]],
-      { tier: "structure", baseWidth: sw * 0.5, stroke: PALETTE.skin, rng });
   }
 
   // === HEAD ===
@@ -306,24 +336,24 @@ function renderPerson(entity, quality, namespace) {
   }
 
   // === FACIAL FEATURES ===
+  // Eyes (visible at base quality for recognition)
+  penLineToGroup(group, [[w * 0.435, h * 0.19], [w * 0.45, h * 0.185]],
+    { tier: "outline", baseWidth: sw * 0.55, stroke: ink, rng });
+  penLineToGroup(group, [[w * 0.55, h * 0.185], [w * 0.565, h * 0.19]],
+    { tier: "outline", baseWidth: sw * 0.55, stroke: ink, rng });
+  // Nose (visible at base quality)
+  penLineToGroup(group, [[w * 0.50, h * 0.19], [w * 0.498, h * 0.21], [w * 0.505, h * 0.212]],
+    { tier: "structure", baseWidth: sw * 0.35, stroke: shade(PALETTE.skin, -30), rng });
+  // Mouth (visible at base quality)
+  penLineToGroup(group, [[w * 0.47, h * 0.24], [w * 0.50, h * 0.245], [w * 0.53, h * 0.24]],
+    { tier: "structure", baseWidth: sw * 0.45, stroke: PALETTE.rose, rng });
+
   if (isFull) {
     // Eyebrows
     penLineToGroup(group, [[w * 0.425, h * 0.17], [w * 0.44, h * 0.162], [w * 0.455, h * 0.17]],
       { tier: "structure", baseWidth: sw * 0.5, stroke: hairColor, rng });
     penLineToGroup(group, [[w * 0.545, h * 0.17], [w * 0.56, h * 0.162], [w * 0.575, h * 0.17]],
       { tier: "structure", baseWidth: sw * 0.5, stroke: hairColor, rng });
-    // Eyes
-    penLineToGroup(group, [[w * 0.435, h * 0.19], [w * 0.45, h * 0.185]],
-      { tier: "outline", baseWidth: sw * 0.55, stroke: ink, rng });
-    penLineToGroup(group, [[w * 0.55, h * 0.185], [w * 0.565, h * 0.19]],
-      { tier: "outline", baseWidth: sw * 0.55, stroke: ink, rng });
-    // Nose
-    penLineToGroup(group, [[w * 0.50, h * 0.19], [w * 0.498, h * 0.21], [w * 0.505, h * 0.212]],
-      { tier: "structure", baseWidth: sw * 0.35, stroke: shade(PALETTE.skin, -30), rng });
-    // Mouth
-    penLineToGroup(group, [[w * 0.47, h * 0.24], [w * 0.50, h * 0.245], [w * 0.53, h * 0.24]],
-      { tier: "structure", baseWidth: sw * 0.45, stroke: PALETTE.rose, rng });
-    // Hair texture lines
     repeat(group, isWoman ? 7 : 4, i => {
       penLineToGroup(group, [[w * (0.40 + i * 0.03), h * 0.10], [w * (0.41 + i * 0.03), h * 0.065]],
         { tier: "texture", baseWidth: sw * 0.28, stroke: shade(hairColor, 20), rng });
@@ -387,12 +417,10 @@ function renderCat(entity, quality, namespace) {
   penLineToGroup(group, [[w * 0.74, h * 0.18], [w * 0.80, h * 0.04], [w * 0.84, h * 0.06], [w * 0.86, h * 0.22]],
     { tier: "outline", baseWidth: sw * 0.9, stroke: ink, rng });
   // Inner ear
-  if (isFull) {
-    penLineToGroup(group, [[w * 0.60, h * 0.16], [w * 0.62, h * 0.10], [w * 0.66, h * 0.18]],
-      { tier: "structure", baseWidth: sw * 0.35, stroke: PALETTE.rose, rng });
-    penLineToGroup(group, [[w * 0.78, h * 0.14], [w * 0.80, h * 0.10], [w * 0.83, h * 0.18]],
-      { tier: "structure", baseWidth: sw * 0.35, stroke: PALETTE.rose, rng });
-  }
+  penLineToGroup(group, [[w * 0.60, h * 0.16], [w * 0.62, h * 0.10], [w * 0.66, h * 0.18]],
+    { tier: "structure", baseWidth: sw * 0.35, stroke: PALETTE.rose, rng });
+  penLineToGroup(group, [[w * 0.78, h * 0.14], [w * 0.80, h * 0.10], [w * 0.83, h * 0.18]],
+    { tier: "structure", baseWidth: sw * 0.35, stroke: PALETTE.rose, rng });
 
   // === LEGS (front paws visible) ===
   penLineToGroup(group, [[w * 0.28, h * 0.74], [w * 0.22, h * 0.88], [w * 0.24, h * 0.93]],
@@ -406,18 +434,19 @@ function renderCat(entity, quality, namespace) {
     : [[w * 0.20, h * 0.64], [w * 0.06, h * 0.48], [w * 0.08, h * 0.28], [w * 0.14, h * 0.22]];
   penLineToGroup(group, tailPts, { tier: "outline", baseWidth: sw * 0.7, stroke: ink, rng });
 
+  // === FACE DETAILS (visible at base quality for recognition) ===
+  // Eyes (almond shaped)
+  penLineToGroup(group, [[w * 0.61, h * 0.33], [w * 0.64, h * 0.31], [w * 0.66, h * 0.33]],
+    { tier: "outline", baseWidth: sw * 0.6, stroke: ink, rng });
+  penLineToGroup(group, [[w * 0.72, h * 0.33], [w * 0.75, h * 0.31], [w * 0.77, h * 0.33]],
+    { tier: "outline", baseWidth: sw * 0.6, stroke: ink, rng });
+  // Pupils
+  add(group, "circle", { cx: (w * 0.64).toFixed(1), cy: (h * 0.32).toFixed(1), r: (sw * 0.5).toFixed(2), fill: PALETTE.deepInk, stroke: "none" });
+  add(group, "circle", { cx: (w * 0.74).toFixed(1), cy: (h * 0.32).toFixed(1), r: (sw * 0.5).toFixed(2), fill: PALETTE.deepInk, stroke: "none" });
+  // Nose
+  add(group, "path", { d: `M${(w * 0.68).toFixed(1)} ${(h * 0.39).toFixed(1)} L${(w * 0.70).toFixed(1)} ${(h * 0.40).toFixed(1)} L${(w * 0.72).toFixed(1)} ${(h * 0.39).toFixed(1)} Z`, fill: PALETTE.rose, stroke: "none" });
+
   if (isFull) {
-    // === FACE DETAILS ===
-    // Eyes (almond shaped)
-    penLineToGroup(group, [[w * 0.61, h * 0.33], [w * 0.64, h * 0.31], [w * 0.66, h * 0.33]],
-      { tier: "outline", baseWidth: sw * 0.6, stroke: ink, rng });
-    penLineToGroup(group, [[w * 0.72, h * 0.33], [w * 0.75, h * 0.31], [w * 0.77, h * 0.33]],
-      { tier: "outline", baseWidth: sw * 0.6, stroke: ink, rng });
-    // Pupils
-    add(group, "circle", { cx: (w * 0.64).toFixed(1), cy: (h * 0.32).toFixed(1), r: (sw * 0.5).toFixed(2), fill: PALETTE.deepInk, stroke: "none" });
-    add(group, "circle", { cx: (w * 0.74).toFixed(1), cy: (h * 0.32).toFixed(1), r: (sw * 0.5).toFixed(2), fill: PALETTE.deepInk, stroke: "none" });
-    // Nose
-    add(group, "path", { d: `M${(w * 0.68).toFixed(1)} ${(h * 0.39).toFixed(1)} L${(w * 0.70).toFixed(1)} ${(h * 0.40).toFixed(1)} L${(w * 0.72).toFixed(1)} ${(h * 0.39).toFixed(1)} Z`, fill: PALETTE.rose, stroke: "none" });
     // Mouth lines
     penLineToGroup(group, [[w * 0.70, h * 0.40], [w * 0.68, h * 0.42]],
       { tier: "structure", baseWidth: sw * 0.35, stroke: ink, rng });
@@ -491,9 +520,11 @@ function renderDog(entity, quality, namespace) {
   penLineToGroup(group, [[w * 0.16, h * 0.56], [w * 0.06, h * 0.46], [w * 0.08, h * 0.36], [w * 0.14, h * 0.30]],
     { tier: "outline", baseWidth: sw * 0.6, stroke: ink, rng });
 
+  // Eye (visible at base quality for recognition)
+  add(group, "circle", { cx: (w * 0.84).toFixed(1), cy: (h * 0.40).toFixed(1), r: (sw * 0.65).toFixed(2), fill: PALETTE.deepInk, stroke: "none" });
+
   if (isFull) {
-    // Eye with highlight
-    add(group, "circle", { cx: (w * 0.84).toFixed(1), cy: (h * 0.40).toFixed(1), r: (sw * 0.65).toFixed(2), fill: PALETTE.deepInk, stroke: "none" });
+    // Eye highlight
     add(group, "circle", { cx: (w * 0.845).toFixed(1), cy: (h * 0.395).toFixed(1), r: (sw * 0.2).toFixed(2), fill: PALETTE.cream, stroke: "none" });
     // Mouth
     penLineToGroup(group, [[w * 0.83, h * 0.48], [w * 0.86, h * 0.47], [w * 0.88, h * 0.48]],
@@ -1098,14 +1129,21 @@ function renderCloud(entity, quality, namespace) {
   // Underside shadow
   add(group, "ellipse", { cx: (w * 0.50).toFixed(1), cy: (h * 0.78).toFixed(1), rx: (w * 0.46).toFixed(1), ry: (h * 0.14).toFixed(1), fill: shade(color, -30), opacity: "0.20", stroke: "none" });
 
-  // Main cloud puffs — varied sizes and positions
-  const puffs = [[w * 0.18, h * 0.63, h * 0.26], [w * 0.32, h * 0.54, h * 0.22], [w * 0.50, h * 0.56, h * 0.24], [w * 0.66, h * 0.58, h * 0.21], [w * 0.80, h * 0.65, h * 0.20], [w * 0.26, h * 0.52, h * 0.18], [w * 0.58, h * 0.51, h * 0.17]];
-  puffs.forEach(([cx, cy, cr], pi) => {
-    add(group, "circle", { cx: cx.toFixed(1), cy: cy.toFixed(1), r: cr.toFixed(1), fill: pi % 2 ? color : shade(color, 8), stroke: ink, "stroke-width": sw.toFixed(2) });
+  // Main cloud shape — bezier puff path for organic silhouette
+  add(group, "path", {
+    d: [
+      `M${(w * 0.08).toFixed(1)} ${(h * 0.64).toFixed(1)}`,
+      `C${(w * 0.06).toFixed(1)} ${(h * 0.38).toFixed(1)} ${(w * 0.20).toFixed(1)} ${(h * 0.32).toFixed(1)} ${(w * 0.28).toFixed(1)} ${(h * 0.38).toFixed(1)}`,
+      `C${(w * 0.24).toFixed(1)} ${(h * 0.20).toFixed(1)} ${(w * 0.42).toFixed(1)} ${(h * 0.22).toFixed(1)} ${(w * 0.50).toFixed(1)} ${(h * 0.32).toFixed(1)}`,
+      `C${(w * 0.56).toFixed(1)} ${(h * 0.18).toFixed(1)} ${(w * 0.72).toFixed(1)} ${(h * 0.24).toFixed(1)} ${(w * 0.78).toFixed(1)} ${(h * 0.36).toFixed(1)}`,
+      `C${(w * 0.86).toFixed(1)} ${(h * 0.28).toFixed(1)} ${(w * 0.96).toFixed(1)} ${(h * 0.45).toFixed(1)} ${(w * 0.90).toFixed(1)} ${(h * 0.60).toFixed(1)}`,
+      `L${(w * 0.08).toFixed(1)} ${(h * 0.64).toFixed(1)} Z`
+    ].join(" "),
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
   });
-
-  // Base
-  penLineToGroup(group, [[w * 0.10, h * 0.72], [w * 0.32, h * 0.68], [w * 0.55, h * 0.74], [w * 0.78, h * 0.70], [w * 0.92, h * 0.72]], { tier: "structure", baseWidth: sw * 0.6, stroke: shade(color, -22), rng });
+  // Lower edge detail
+  penLineToGroup(group, [[w * 0.10, h * 0.62], [w * 0.28, h * 0.65], [w * 0.50, h * 0.60], [w * 0.72, h * 0.63], [w * 0.88, h * 0.60]],
+    { tier: "structure", baseWidth: sw * 0.5, stroke: shade(color, -15), rng });
 
   if (isFull) {
     // Fluff texture
@@ -1222,17 +1260,29 @@ function renderTree(entity, quality, namespace) {
     fill: accent, stroke: ink, "stroke-width": sw.toFixed(2)
   });
 
-  // Foliage clusters
-  repeat(group, 7, i => {
-    const cx = w * (0.22 + (i % 4) * 0.18);
-    const cy = h * (0.20 + Math.floor(i / 4) * 0.20 + (i % 2) * 0.04);
-    const cr = h * (0.18 + (i % 3) * 0.02);
-    add(group, "circle", {
-      cx: cx.toFixed(1), cy: cy.toFixed(1), r: cr.toFixed(1),
-      fill: i % 3 ? color : shade(color, 10),
+  // Foliage clusters — organic overlapping ellipses for natural canopy
+  const canopyDefs = [
+    // [cx, cy, rx, ry, rotation-deg, fill-variant, stroke-variant]
+    [w * 0.50, h * 0.18, w * 0.30, h * 0.22, -5, 0, 0],
+    [w * 0.28, h * 0.34, w * 0.22, h * 0.18, -15, 1, 0],
+    [w * 0.70, h * 0.32, w * 0.20, h * 0.17, 12, 2, 0],
+    [w * 0.40, h * 0.08, w * 0.18, h * 0.14, 8, 1, 0],
+    [w * 0.62, h * 0.10, w * 0.16, h * 0.13, -8, 0, 0],
+    [w * 0.20, h * 0.48, w * 0.15, h * 0.11, -20, 1, 0],
+    [w * 0.78, h * 0.46, w * 0.14, h * 0.11, 18, 2, 0],
+    [w * 0.34, h * 0.20, w * 0.16, h * 0.12, 3, 0, 0],
+    [w * 0.66, h * 0.21, w * 0.14, h * 0.10, -3, 1, 0]
+  ];
+  for (const [cx, cy, rx, ry, rot, v] of canopyDefs) {
+    const fg = node("g", { transform: `rotate(${rot} ${cx.toFixed(1)} ${cy.toFixed(1)})` });
+    add(fg, "ellipse", {
+      cx: cx.toFixed(1), cy: cy.toFixed(1),
+      rx: rx.toFixed(1), ry: ry.toFixed(1),
+      fill: v === 2 ? shade(color, 10) : v === 1 ? shade(color, -6) : color,
       stroke: ink, "stroke-width": sw.toFixed(2)
     });
-  });
+    group.appendChild(fg);
+  }
 
   if (isFull) {
     // Trunk bark texture
@@ -1572,19 +1622,49 @@ export function renderEntity(entity, options = {}) {
     const { width: w, height: h, params = {}, templateId } = entity;
     const color = params.color || DEFAULT_COLORS[templateId] || PALETTE.green;
     const ns = namespace || "canvas";
+    const cat = grammarCategory(templateId);
 
-    // Primary gradient
-    const g1 = node("linearGradient", {
-      id: namespaceId(ns, `grad-${entity.id}`),
-      x1: "0", y1: "0", x2: "1", y2: "1",
-      gradientTransform: "rotate(25)"
-    });
-    const stop1a = node("stop", { offset: "0%", "stop-color": shade(color, 20), "stop-opacity": "1" });
-    const stop1b = node("stop", { offset: "45%", "stop-color": color, "stop-opacity": "1" });
-    const stop1c = node("stop", { offset: "100%", "stop-color": shade(color, -25), "stop-opacity": "1" });
-    g1.appendChild(stop1a);
-    g1.appendChild(stop1b);
-    g1.appendChild(stop1c);
+    // Primary gradient — strategy varies by entity category
+    const g1Id = namespaceId(ns, `grad-${entity.id}`);
+    let g1;
+
+    if (cat === "figure") {
+      // Radial gradient: simulates front-lighting, creates volume on characters
+      g1 = node("radialGradient", {
+        id: g1Id, cx: "45%", cy: "30%", r: "70%"
+      });
+      g1.appendChild(node("stop", { offset: "0%", "stop-color": shade(color, 40), "stop-opacity": "1" }));
+      g1.appendChild(node("stop", { offset: "30%", "stop-color": shade(color, 15), "stop-opacity": "1" }));
+      g1.appendChild(node("stop", { offset: "65%", "stop-color": color, "stop-opacity": "1" }));
+      g1.appendChild(node("stop", { offset: "100%", "stop-color": shade(color, -30), "stop-opacity": "1" }));
+    } else if (cat === "structure") {
+      // Horizontal linear gradient: simulates side lighting
+      g1 = node("linearGradient", {
+        id: g1Id, x1: "0", y1: "0.5", x2: "1", y2: "0.5"
+      });
+      g1.appendChild(node("stop", { offset: "0%", "stop-color": shade(color, -20), "stop-opacity": "1" }));
+      g1.appendChild(node("stop", { offset: "35%", "stop-color": shade(color, 10), "stop-opacity": "1" }));
+      g1.appendChild(node("stop", { offset: "65%", "stop-color": shade(color, -5), "stop-opacity": "1" }));
+      g1.appendChild(node("stop", { offset: "100%", "stop-color": shade(color, -30), "stop-opacity": "1" }));
+    } else if (cat === "nature") {
+      // Angled gradient with organic twist: simulates dappled light
+      g1 = node("linearGradient", {
+        id: g1Id, x1: "0.1", y1: "0", x2: "0.9", y2: "1",
+        gradientTransform: "rotate(18)"
+      });
+      g1.appendChild(node("stop", { offset: "0%", "stop-color": shade(color, 35), "stop-opacity": "1" }));
+      g1.appendChild(node("stop", { offset: "40%", "stop-color": shade(color, 12), "stop-opacity": "1" }));
+      g1.appendChild(node("stop", { offset: "75%", "stop-color": shade(color, -8), "stop-opacity": "1" }));
+      g1.appendChild(node("stop", { offset: "100%", "stop-color": shade(color, -32), "stop-opacity": "1" }));
+    } else {
+      // Atmosphere: transparency-based gradient
+      g1 = node("linearGradient", {
+        id: g1Id, x1: "0", y1: "0", x2: "0", y2: "1"
+      });
+      g1.appendChild(node("stop", { offset: "0%", "stop-color": color, "stop-opacity": "0.9" }));
+      g1.appendChild(node("stop", { offset: "50%", "stop-color": color, "stop-opacity": "0.6" }));
+      g1.appendChild(node("stop", { offset: "100%", "stop-color": color, "stop-opacity": "0.25" }));
+    }
     defs.appendChild(g1);
 
     // Shadow gradient
