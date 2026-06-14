@@ -1276,15 +1276,14 @@ function renderMountain(entity, quality, namespace) {
   const ink = PALETTE.ink;
   const sw = Math.max(1.8, Math.min(w, h) * 0.016);
 
-  // Background peak (lighter)
-  add(group, "path", {
-    d: `M0 ${h} L${(w * 0.24).toFixed(1)} ${(h * 0.36).toFixed(1)} L${(w * 0.44).toFixed(1)} ${h} Z`,
-    fill: shade(color, 15), stroke: ink, "stroke-width": sw.toFixed(2)
-  });
+  // Distant peak
+  add(group, "path", { d: `M0 ${h} L${(w * 0.26).toFixed(1)} ${(h * 0.30).toFixed(1)} L${(w * 0.48).toFixed(1)} ${h} Z`, fill: shade(color, 18), stroke: ink, "stroke-width": sw.toFixed(2) });
+  // Mid peak
+  add(group, "path", { d: `M${(w * 0.06).toFixed(1)} ${h} L${(w * 0.40).toFixed(1)} ${(h * 0.20).toFixed(1)} L${(w * 0.70).toFixed(1)} ${h} Z`, fill: shade(color, 6), stroke: ink, "stroke-width": sw.toFixed(2) });
 
-  // Main peak
+  // Main peak — irregular ridge
   add(group, "path", {
-    d: `M${(w * 0.18).toFixed(1)} ${h} L${(w * 0.50).toFixed(1)} ${(h * 0.10).toFixed(1)} L${(w * 0.72).toFixed(1)} ${(h * 0.60).toFixed(1)} L${(w * 0.84).toFixed(1)} ${(h * 0.30).toFixed(1)} L${w} ${h} Z`,
+    d: `M${(w * 0.14).toFixed(1)} ${h} L${(w * 0.34).toFixed(1)} ${(h * 0.48).toFixed(1)} L${(w * 0.46).toFixed(1)} ${(h * 0.28).toFixed(1)} L${(w * 0.50).toFixed(1)} ${(h * 0.08).toFixed(1)} L${(w * 0.58).toFixed(1)} ${(h * 0.26).toFixed(1)} L${(w * 0.74).toFixed(1)} ${(h * 0.54).toFixed(1)} L${(w * 0.88).toFixed(1)} ${(h * 0.26).toFixed(1)} L${w} ${h} Z`,
     fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
   });
 
@@ -1302,10 +1301,13 @@ function renderMountain(entity, quality, namespace) {
     });
 
     // Ridge lines
-    repeat(group, 4, i => {
-      const rx = w * (0.30 + i * 0.12);
-      penLineToGroup(group, [[rx, h * (0.50 + i * 0.08)], [rx + w * 0.06, h * (0.38 + i * 0.05)]],
-        { tier: "texture", baseWidth: sw * 0.25, stroke: shade(color, -10), rng });
+    repeat(group, 5, i => {
+      penLineToGroup(group, [[w * (0.24 + i * 0.10), h * (0.48 + i * 0.06)], [w * (0.28 + i * 0.10), h * (0.36 + i * 0.04)]],
+        { tier: "texture", baseWidth: sw * 0.22, stroke: shade(color, -10), rng });
+    });
+    // Tree line
+    repeat(group, 3, i => {
+      add(group, "circle", { cx: (w * (0.18 + i * 0.28)).toFixed(1), cy: (h * (0.82 + i * 0.02)).toFixed(1), r: (sw * 0.9).toFixed(2), fill: PALETTE.foliageDark, opacity: "0.5", stroke: "none" });
     });
   }
 
