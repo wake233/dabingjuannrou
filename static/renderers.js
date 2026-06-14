@@ -60,11 +60,24 @@ function inkSilhouette(entity) {
   return finish(group, entity, "ink");
 }
 
-export function renderArtworkEntity(entity, style = "storybook") {
+/**
+ * Render an artwork entity in the specified style.
+ *
+ * @param {object} entity - Entity object
+ * @param {string} style - "storybook", "woodcut", or "ink"
+ * @param {object} [options] - Rendering options
+ * @param {string} [options.quality="full"] - "base" or "full" (storybook only)
+ * @param {string} [options.namespace="canvas"] - SVG id namespace
+ * @returns {SVGElement} SVG group element
+ */
+export function renderArtworkEntity(entity, style = "storybook", options = {}) {
   if (!ART_STYLES.includes(style)) throw new Error("艺术风格无效");
   if (style === "woodcut") return woodcutSilhouette(entity);
   if (style === "ink") return inkSilhouette(entity);
-  const rendered = renderStorybookEntity(entity);
+  const rendered = renderStorybookEntity(entity, {
+    quality: options.quality || "full",
+    namespace: options.namespace || "canvas"
+  });
   rendered.setAttribute("data-renderer", style);
   rendered.setAttribute("data-semantic-entity", entity.templateId);
   return rendered;

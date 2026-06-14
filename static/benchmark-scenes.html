@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>六张标杆场景 - 听画绘本验收</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Microsoft YaHei UI", sans-serif; background: #2a2a2a; color: #f4ead7; }
+    header { background: #1a1a1a; padding: 24px 32px; border-bottom: 2px solid #46505e; }
+    header h1 { font-size: 1.4rem; font-weight: 600; }
+    header p { font-size: 0.9rem; opacity: 0.7; margin-top: 4px; }
+    .scenes { display: flex; flex-direction: column; gap: 32px; padding: 32px; max-width: 1100px; margin: 0 auto; }
+    .scene-card { background: #f4ead7; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+    .scene-head { padding: 14px 20px; background: #303946; color: #f4ead7; display: flex; justify-content: space-between; align-items: center; }
+    .scene-head h2 { font-size: 1.05rem; font-weight: 600; }
+    .scene-head .tags { font-size: 0.78rem; opacity: 0.8; }
+    .scene-svg { padding: 8px; background: #f4ead7; }
+    .scene-svg svg { width: 100%; height: auto; display: block; border-radius: 6px; }
+    .scene-criteria { padding: 12px 20px; background: #fffef9; border-top: 1px solid #e8e4d8; }
+    .scene-criteria ul { list-style: none; display: flex; flex-wrap: wrap; gap: 12px; }
+    .scene-criteria li { font-size: 0.78rem; color: #596780; padding: 2px 8px; background: #f4ead7; border-radius: 4px; }
+    .scene-criteria li::before { content: "check "; color: #86a886; font-weight: bold; }
+    footer { text-align: center; padding: 24px; font-size: 0.8rem; opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>六张标杆绘本场景</h1>
+    <p>结构可信、线条细腻、光影统一、没有图标拼接感。人工视觉评审验收。</p>
+  </header>
+  <div class="scenes" id="scenes"></div>
+  <footer>听画 · 绘本场景视觉验收</footer>
+
+  <script type="module">
+    import { renderEntity, TEMPLATE_NAMES } from "./templates.js";
+
+    const SCENES = [
+      {
+        id: "rain-person",
+        title: "雨中人物",
+        tags: "人物 雨 水洼 路灯 伞",
+        entities: [
+          { templateId: "person", x: 320, y: 210, w: 200, h: 380, params: { color: "#596780", accent: "#c97b84", pose: "walking", variant: "woman" } },
+          { templateId: "umbrella", x: 340, y: 80, w: 180, h: 320, params: { color: "#c97b84", accent: "#e8c47c" } },
+          { templateId: "rain", x: 0, y: 0, w: 1000, h: 700, params: { color: "#88a9bd", density: 0.75 } },
+          { templateId: "puddle", x: 390, y: 580, w: 180, h: 60, params: { color: "#a8d4e6" } },
+          { templateId: "streetlamp", x: 660, y: 80, w: 100, h: 480, params: { color: "#303946", accent: "#e8c47c" } }
+        ],
+        criteria: ["人物行走姿态", "雨伞结构", "雨滴方向统一", "水洼反光", "路灯投影"]
+      },
+      {
+        id: "moon-cat",
+        title: "月夜屋顶猫",
+        tags: "猫 屋顶 月亮 星空 建筑群",
+        entities: [
+          { templateId: "moon", x: 680, y: 40, w: 140, h: 140, params: { color: "#e8c47c" } },
+          { templateId: "stars", x: 0, y: 0, w: 1000, h: 400, params: { color: "#e8c47c", density: 0.5, count: 14 } },
+          { templateId: "roof", x: 200, y: 260, w: 320, h: 280, params: { color: "#c17a5e", accent: "#d98f70" } },
+          { templateId: "cat", x: 300, y: 150, w: 160, h: 140, params: { color: "#596780", accent: "#c97b84", pose: "sitting" } },
+          { templateId: "buildings", x: 20, y: 420, w: 960, h: 280, params: { color: "#657f6a", density: 0.6 } }
+        ],
+        criteria: ["猫的姿态自然", "屋顶透视可信", "月光辉光", "星空疏密", "建筑层次"]
+      },
+      {
+        id: "spring-river",
+        title: "春日河岸",
+        tags: "河流 桥 树 花丛 草地 船",
+        entities: [
+          { templateId: "river", x: 0, y: 260, w: 1000, h: 440, params: { color: "#5c8a9e", accent: "#a8d4e6" } },
+          { templateId: "bridge", x: 260, y: 140, w: 480, h: 280, params: { color: "#9e9e8e", accent: "#d98f70" } },
+          { templateId: "tree", x: 80, y: 200, w: 200, h: 340, params: { color: "#5a7a4a", accent: "#8b6914", density: 0.6 } },
+          { templateId: "tree", x: 760, y: 180, w: 220, h: 360, params: { color: "#86a886", accent: "#8b6914", density: 0.5 } },
+          { templateId: "flowers", x: 30, y: 460, w: 200, h: 100, params: { color: "#c97b84", accent: "#e8c47c", count: 8 } },
+          { templateId: "grass", x: 0, y: 420, w: 1000, h: 280, params: { color: "#657f6a", accent: "#5a7a4a" } },
+          { templateId: "boat", x: 620, y: 340, w: 180, h: 120, params: { color: "#8b6914", accent: "#f4ead7" } }
+        ],
+        criteria: ["河流流向", "桥拱结构", "树木冠层", "花朵分布", "草地层次", "船体透视"]
+      },
+      {
+        id: "quiet-street",
+        title: "安静街道",
+        tags: "街道 房屋 栅栏 长椅 路灯 树",
+        entities: [
+          { templateId: "street", x: 0, y: 300, w: 1000, h: 400, params: { color: "#9e9e8e", accent: "#e8c47c" } },
+          { templateId: "house", x: 60, y: 80, w: 250, h: 280, params: { color: "#d98f70", accent: "#c17a5e" } },
+          { templateId: "house", x: 660, y: 100, w: 260, h: 260, params: { color: "#e8c47c", accent: "#d98f70" } },
+          { templateId: "fence", x: 340, y: 250, w: 300, h: 120, params: { color: "#8b6914", accent: "#657f6a", density: 0.6 } },
+          { templateId: "bench", x: 420, y: 400, w: 140, h: 100, params: { color: "#8b6914", accent: "#86a886" } },
+          { templateId: "streetlamp", x: 520, y: 60, w: 80, h: 400, params: { color: "#303946", accent: "#e8c47c" } },
+          { templateId: "tree", x: 800, y: 150, w: 180, h: 340, params: { color: "#86a886", accent: "#8b6914" } }
+        ],
+        criteria: ["街道透视", "房屋门窗", "栅栏连接", "长椅结构", "路灯高度", "树与建筑比例"]
+      },
+      {
+        id: "garden-dog",
+        title: "花园里的狗",
+        tags: "狗 花丛 草地 树 栅栏 云",
+        entities: [
+          { templateId: "dog", x: 300, y: 180, w: 220, h: 220, params: { color: "#d98f70", accent: "#e8c47c", pose: "standing" } },
+          { templateId: "flowers", x: 60, y: 380, w: 200, h: 140, params: { color: "#c97b84", accent: "#e8c47c", count: 12 } },
+          { templateId: "flowers", x: 700, y: 400, w: 180, h: 120, params: { color: "#b56576", accent: "#eaac8b", count: 10 } },
+          { templateId: "grass", x: 0, y: 400, w: 1000, h: 300, params: { color: "#5a7a4a", accent: "#657f6a", density: 0.7 } },
+          { templateId: "tree", x: 60, y: 150, w: 180, h: 320, params: { color: "#86a886", accent: "#8b6914" } },
+          { templateId: "tree", x: 780, y: 170, w: 160, h: 300, params: { color: "#657f6a", accent: "#8b6914" } },
+          { templateId: "fence", x: 0, y: 280, w: 300, h: 100, params: { color: "#8b6914", accent: "#86a886" } },
+          { templateId: "cloud", x: 80, y: 20, w: 200, h: 100, params: { color: "#88a9bd" } },
+          { templateId: "cloud", x: 600, y: 10, w: 240, h: 110, params: { color: "#a8d4e6" } }
+        ],
+        criteria: ["狗的姿态", "花丛疏密", "草地质感", "树木比例", "云朵层次", "栅栏连接"]
+      },
+      {
+        id: "mountain-traveler",
+        title: "山路旅人",
+        tags: "人物 山 树 草地 鸟 太阳 云",
+        entities: [
+          { templateId: "mountain", x: 0, y: 100, w: 1000, h: 400, params: { color: "#657f6a", accent: "#6e6e60", density: 0.6 } },
+          { templateId: "sun", x: 40, y: 20, w: 120, h: 120, params: { color: "#e8c47c" } },
+          { templateId: "cloud", x: 220, y: 30, w: 160, h: 80, params: { color: "#88a9bd" } },
+          { templateId: "cloud", x: 600, y: 10, w: 200, h: 90, params: { color: "#a8d4e6" } },
+          { templateId: "person", x: 400, y: 230, w: 140, h: 280, params: { color: "#596780", accent: "#d98f70", pose: "walking", variant: "man" } },
+          { templateId: "tree", x: 100, y: 280, w: 160, h: 260, params: { color: "#5a7a4a", accent: "#8b6914" } },
+          { templateId: "tree", x: 740, y: 260, w: 200, h: 300, params: { color: "#86a886", accent: "#8b6914" } },
+          { templateId: "grass", x: 0, y: 480, w: 1000, h: 220, params: { color: "#657f6a", accent: "#5a7a4a" } },
+          { templateId: "bird", x: 200, y: 80, w: 280, h: 80, params: { color: "#596780", count: 4 } },
+          { templateId: "bird", x: 600, y: 60, w: 200, h: 80, params: { color: "#88a9bd", count: 3 } }
+        ],
+        criteria: ["山体层次", "人物比例", "太阳辉光", "飞鸟动态", "远近树木差异", "云朵漂浮感"]
+      }
+    ];
+
+    const scenesDiv = document.getElementById("scenes");
+
+    SCENES.forEach(scene => {
+      const card = document.createElement("div");
+      card.className = "scene-card";
+
+      const head = document.createElement("div");
+      head.className = "scene-head";
+      head.innerHTML = `<h2>${scene.title}</h2><span class="tags">${scene.tags}</span>`;
+
+      const svgWrap = document.createElement("div");
+      svgWrap.className = "scene-svg";
+
+      const ns = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(ns, "svg");
+      svg.setAttribute("viewBox", "0 0 1000 700");
+      svg.setAttribute("xmlns", ns);
+
+      const background = document.createElementNS(ns, "rect");
+      background.setAttribute("width", "1000");
+      background.setAttribute("height", "700");
+      background.setAttribute("fill", "#fffef9");
+      svg.appendChild(background);
+
+      scene.entities.forEach((ent, ei) => {
+        const entity = {
+          id: `${scene.id}-${ei}`, kind: "entity",
+          templateId: ent.templateId,
+          name: TEMPLATE_NAMES[ent.templateId] || ent.templateId,
+          x: ent.x, y: ent.y, width: ent.w, height: ent.h,
+          rotation: 0, opacity: 1, params: ent.params || {}
+        };
+        try {
+          const rendered = renderEntity(entity, { quality: "full", namespace: scene.id });
+          svg.appendChild(rendered);
+        } catch (err) {
+          const text = document.createElementNS(ns, "text");
+          text.setAttribute("x", String(ent.x));
+          text.setAttribute("y", String(ent.y + 20));
+          text.setAttribute("fill", "red");
+          text.setAttribute("font-size", "12");
+          text.textContent = `Error: ${err.message}`;
+          svg.appendChild(text);
+        }
+      });
+
+      svgWrap.appendChild(svg);
+
+      const criteria = document.createElement("div");
+      criteria.className = "scene-criteria";
+      criteria.innerHTML = `<ul>${scene.criteria.map(c => `<li>${c}</li>`).join("")}</ul>`;
+
+      card.appendChild(head);
+      card.appendChild(svgWrap);
+      card.appendChild(criteria);
+      scenesDiv.appendChild(card);
+    });
+  </script>
+</body>
+</html>

@@ -6,14 +6,17 @@ import { generateCompositionDrafts } from "../static/art_schema.js";
 
 const portfolio = JSON.parse(fs.readFileSync(new URL("../docs/portfolio.json", import.meta.url), "utf8"));
 
-test("十二题材三风格作品集均达到五维评分门槛", () => {
+test("作品集返回结构化的题材信息，不自动填充完成度分数", () => {
   const summary = portfolioSummary(portfolio.subjects);
-  assert.equal(summary.total, 12);
-  assert.equal(summary.passed, 12);
-  assert.ok(summary.average >= 4);
+  assert.equal(summary.total, portfolio.subjects.length);
+  assert.ok(summary.note.includes("人工审查"));
   for (const entry of summary.entries) {
     assert.deepEqual(Object.keys(entry.styles), ["storybook", "woodcut", "ink"]);
-    assert.ok(Object.values(entry.styles).every(scores => Object.values(scores).every(score => score >= 4)));
+    assert.equal(entry.requiresVisualReview, true);
+    for (const [, styleInfo] of Object.entries(entry.styles)) {
+      assert.equal(typeof styleInfo.composition, "string");
+      assert.equal(styleInfo.requiresVisualReview, true);
+    }
   }
 });
 

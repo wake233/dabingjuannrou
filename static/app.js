@@ -34,6 +34,8 @@ let recoveryCount = 0;
 let sessionStartedAt = null;
 let releasingCloudResources = false;
 let activeTextureDataUrl = "";
+let progressiveRenderId = 0;
+let progressiveRenderHandle = null;
 
 const MIN_SPEECH_MS = 250;
 const MAX_SEGMENT_MS = 10000;
@@ -84,10 +86,15 @@ export function polygonPoints(kind, o) {
   return points.join(" ");
 }
 
-export function svgElement(o) {
+export function svgElement(o, renderOptions = {}) {
   if (o.kind === "entity") {
-    const entity = renderArtworkEntity(o, engine.state.art.artDirection.style);
-    if (engine.state.selection.includes(o.id)) entity.setAttribute("filter", "url(#selection-glow)");
+    const entity = renderArtworkEntity(o, engine.state.art.artDirection.style, {
+      quality: renderOptions.quality || "full",
+      namespace: renderOptions.namespace || "canvas"
+    });
+    if (engine.state.selection.includes(o.id) && !renderOptions.noSelectionHighlight) {
+      entity.setAttribute("filter", "url(#selection-glow)");
+    }
     return entity;
   }
   const ns = "http://www.w3.org/2000/svg";
@@ -115,11 +122,11 @@ export function svgElement(o) {
   return el;
 }
 
-function renderObjects(layerElement, objects, selection = [], textureDataUrl = "") {
+function renderObjects(layerElement, objects, selection = [], textureDataUrl = "", renderOptions = {}) {
   const selectionSet = new Set(selection);
   const rendered = objects.map(o => {
-    const el = svgElement(o);
-    if (selectionSet.has(o.id)) {
+    const el = svgElement(o, renderOptions);
+    if (selectionSet.has(o.id) && !renderOptions.noSelectionHighlight) {
       el.setAttribute("filter", "url(#selection-glow)");
     }
     return el;
@@ -170,7 +177,8 @@ function tryPreviewRender(text) {
     // Bypass execute's undo stack by directly mutating clone state
     // (DrawingEngine.execute pushes to undoStack, but we just want the result)
     clone.execute(actions);
-    renderObjects(previewLayer, clone.state.objects);
+    renderObjects(previewLayer, clone.state.objects, [], "",
+      { quality: "base", namespace: "preview", noSelectionHighlight: true });
     lastPreviewText = text;
     lastPreviewTime = now;
   } catch {
@@ -182,10 +190,57 @@ function tryPreviewRender(text) {
 
 let lastRenderDuration = 0;
 
+function scheduleFrame(callback) {
+  if (typeof requestAnimationFrame === "function") {
+    return requestAnimationFrame(callback);
+  }
+  // Node/test environment fallback
+  return setTimeout(callback, 0);
+}
+
+function cancelFrame(handle) {
+  if (typeof cancelAnimationFrame === "function") {
+    cancelAnimationFrame(handle);
+  } else {
+    clearTimeout(handle);
+  }
+}
+
+function cancelProgressiveRender() {
+  if (progressiveRenderHandle !== null) {
+    cancelFrame(progressiveRenderHandle);
+    progressiveRenderHandle = null;
+  }
+  progressiveRenderId += 1;
+}
+
 export function render() {
   const started = performance.now();
   clearPreview();
-  renderObjects(layer, engine.state.objects, engine.state.selection, activeTextureDataUrl);
+  cancelProgressiveRender();
+
+  // Render at full quality immediately (progressive scheduling in browser)
+  const hasRaf = typeof requestAnimationFrame === "function";
+  const initialQuality = hasRaf ? "base" : "full";
+
+  // Step 1: Render initial quality immediately
+  const currentRenderId = progressiveRenderId;
+  renderObjects(layer, engine.state.objects, engine.state.selection, activeTextureDataUrl,
+    { quality: initialQuality, namespace: "canvas" });
+
+  // Step 2: Schedule full quality render if progressive is available
+  if (hasRaf) {
+    const objects = [...engine.state.objects];
+    const selection = [...engine.state.selection];
+    const textureUrl = activeTextureDataUrl;
+    progressiveRenderHandle = scheduleFrame(() => {
+      if (progressiveRenderId !== currentRenderId) return; // Cancelled
+      renderObjects(layer, objects, selection, textureUrl,
+        { quality: "full", namespace: "canvas" });
+      progressiveRenderHandle = null;
+    });
+  }
+
   $("canvas").style.background = engine.state.background;
   $("object-count").textContent = engine.state.objects.length;
   $("selection-count").textContent = engine.state.selection.length;
@@ -279,11 +334,26 @@ export function download(format) {
 }
 
 function exportSvgSource() {
+  // Force full-quality render before export (cancel any pending progressive)
+  cancelProgressiveRender();
+  renderObjects(layer, engine.state.objects, engine.state.selection, activeTextureDataUrl,
+    { quality: "full", namespace: "export", noSelectionHighlight: true });
+
   const canvas = $("canvas");
   const clean = canvas.cloneNode?.(true) || canvas;
   clean.querySelector?.("#preview-layer")?.replaceChildren();
   clean.querySelectorAll?.('[filter="url(#selection-glow)"]').forEach(element => element.removeAttribute("filter"));
   clean.querySelectorAll?.(".preview").forEach(element => element.remove());
+
+  // If there's a pending progressive render for main canvas, re-trigger it
+  if (progressiveRenderHandle === null && typeof requestAnimationFrame === "function") {
+    progressiveRenderHandle = scheduleFrame(() => {
+      renderObjects(layer, engine.state.objects, engine.state.selection, activeTextureDataUrl,
+        { quality: "full", namespace: "canvas" });
+      progressiveRenderHandle = null;
+    });
+  }
+
   return new XMLSerializer().serializeToString(clean);
 }
 

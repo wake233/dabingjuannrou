@@ -1,10 +1,18 @@
 import { ENTITY_TEMPLATES, TEMPLATE_NAMES } from "./scene_schema.js";
+import {
+  LINE_TIERS, seedFromString, createRNG, clamp, penPath, taperedStroke,
+  createPenElement, generateHatchLines, namespaceId, countPathNodes, checkNodeLimit
+} from "./pen_stroke.js";
 
 const NS = "http://www.w3.org/2000/svg";
+
 const PALETTE = Object.freeze({
   ink: "#46505e", deepInk: "#303946", warm: "#d98f70", rose: "#c97b84",
   gold: "#e8c47c", green: "#86a886", moss: "#657f6a", blue: "#88a9bd",
-  deepBlue: "#617f96", night: "#596780", paper: "#f4ead7", cream: "#fff8e9"
+  deepBlue: "#617f96", night: "#596780", paper: "#f4ead7", cream: "#fff8e9",
+  skin: "#efc5a5", skinShadow: "#d4a78a", wood: "#8b6914", brick: "#c17a5e",
+  waterLight: "#a8d4e6", waterDark: "#5c8a9e", foliage: "#5a7a4a",
+  foliageDark: "#3d5432", stone: "#9e9e8e", stoneDark: "#6e6e60"
 });
 
 function node(tag, attrs = {}) {
@@ -14,207 +22,1565 @@ function node(tag, attrs = {}) {
 }
 
 function add(group, tag, attrs) {
-  const element = node(tag, attrs);
-  group.appendChild(element);
-  return element;
+  const el = node(tag, attrs);
+  group.appendChild(el);
+  return el;
 }
 
 function repeat(group, count, create) {
-  for (let index = 0; index < count; index += 1) create(index);
+  for (let i = 0; i < count; i += 1) create(i);
 }
 
 function shade(hex, amount) {
-  const value = Number.parseInt(hex.slice(1), 16);
-  const clamp = channel => Math.max(0, Math.min(255, channel + amount));
-  return `#${[value >> 16, value >> 8 & 255, value & 255].map(channel => clamp(channel).toString(16).padStart(2, "0")).join("")}`;
+  const v = Number.parseInt(hex.slice(1), 16);
+  const c = (ch) => Math.max(0, Math.min(255, ch + amount));
+  return `#${[v >> 16, (v >> 8) & 255, v & 255].map(ch => c(ch).toString(16).padStart(2, "0")).join("")}`;
 }
 
-function detail(group, tag, attrs) {
-  return add(group, tag, { "data-art-detail": "true", ...attrs });
+function alpha(hex, a) {
+  const v = Number.parseInt(hex.slice(1), 16);
+  return `rgba(${v >> 16},${(v >> 8) & 255},${v & 255},${a})`;
 }
 
-function renderTemplate(entity) {
-  const { templateId, width: w, height: h, params = {} } = entity;
-  const color = params.color || (["rain", "river", "puddle", "cloud"].includes(templateId) ? PALETTE.blue : PALETTE.green);
+// ---------- Rendering functions ----------
+
+function renderDefs(group, entity, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.green;
   const accent = params.accent || PALETTE.warm;
-  const ink = PALETTE.ink;
-  const dark = shade(color, -32);
-  const light = shade(color, 38);
-  const strokeWidth = Math.max(1.5, Math.min(w, h) * .018);
-  const group = node("g", { "data-template": templateId, "data-art-style": "storybook-layered", "stroke-linecap": "round", "stroke-linejoin": "round" });
-  const line = { stroke: ink, "stroke-width": strokeWidth, fill: "none" };
-  if (templateId === "person") {
-    const woman = params.variant === "woman";
-    const walking = params.pose === "walking";
-    detail(group, "ellipse", { cx:w*.5, cy:h*.965, rx:w*.28, ry:h*.025, fill:PALETTE.night, opacity:.18, stroke:"none" });
-    detail(group, "path", { d:`M${w*.36} ${h*.19} Q${w*.5} ${h*.045} ${w*.66} ${h*.19} L${w*.63} ${h*.31} Q${w*.5} ${h*.25} ${w*.37} ${h*.31} Z`, fill:woman ? dark : PALETTE.deepInk, stroke:ink, "stroke-width":strokeWidth });
-    add(group, "ellipse", { cx:w*.5, cy:h*.22, rx:w*.105, ry:h*.105, fill:"#efc5a5", stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.43} ${h*.215} Q${w*.46} ${h*.195} ${w*.49} ${h*.215} M${w*.54} ${h*.215} Q${w*.57} ${h*.195} ${w*.6} ${h*.215} M${w*.48} ${h*.26} Q${w*.52} ${h*.275} ${w*.56} ${h*.255}`, ...line, "stroke-width":strokeWidth*.65 });
-    detail(group, "path", { d:`M${w*.37} ${h*.31} Q${w*.5} ${h*.27} ${w*.63} ${h*.31} L${w*.73} ${h*.67} Q${w*.5} ${h*.76} ${w*.27} ${h*.67} Z`, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.36} ${h*.36} Q${w*.5} ${h*.43} ${w*.64} ${h*.36}`, fill:"none", stroke:light, "stroke-width":strokeWidth*1.5 });
-    if (woman) detail(group, "path", { d:`M${w*.35} ${h*.52} L${w*.2} ${h*.82} Q${w*.5} ${h*.9} ${w*.8} ${h*.82} L${w*.65} ${h*.52} Z`, fill:shade(color, 15), stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.35} ${h*.39} Q${w*.22} ${h*.5} ${w*.19} ${h*.66} M${w*.65} ${h*.39} Q${w*.75} ${h*.48} ${w*.79} ${h*.58}`, ...line, stroke:"#efc5a5", "stroke-width":strokeWidth*2.4 });
-    const leftFoot = walking ? .31 : .39, rightFoot = walking ? .75 : .61;
-    detail(group, "path", { d:`M${w*.43} ${h*.74} L${w*leftFoot} ${h*.94} M${w*.57} ${h*.74} L${w*rightFoot} ${h*.94}`, ...line, stroke:dark, "stroke-width":strokeWidth*3 });
-    detail(group, "path", { d:`M${w*(leftFoot-.06)} ${h*.95} Q${w*leftFoot} ${h*.91} ${w*(leftFoot+.1)} ${h*.955} M${w*(rightFoot-.06)} ${h*.95} Q${w*rightFoot} ${h*.91} ${w*(rightFoot+.1)} ${h*.955}`, ...line, stroke:PALETTE.deepInk, "stroke-width":strokeWidth*2 });
-  } else if (templateId === "cat") {
-    detail(group, "ellipse", { cx:w*.48, cy:h*.92, rx:w*.36, ry:h*.05, fill:PALETTE.night, opacity:.15, stroke:"none" });
-    add(group, "ellipse", { cx:w*.46, cy:h*.63, rx:w*.32, ry:h*.25, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    add(group, "circle", { cx:w*.68, cy:h*.36, r:h*.2, fill:light, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.54} ${h*.23} L${w*.59} ${h*.02} L${w*.7} ${h*.2} L${w*.83} ${h*.02} L${w*.82} ${h*.29}`, fill:light, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.61} ${h*.36} L${w*.65} ${h*.36} M${w*.75} ${h*.36} L${w*.79} ${h*.36} M${w*.69} ${h*.43} Q${w*.72} ${h*.46} ${w*.75} ${h*.43}`, ...line });
-    detail(group, "path", { d:`M${w*.64} ${h*.46} L${w*.48} ${h*.43} M${w*.65} ${h*.5} L${w*.47} ${h*.53} M${w*.77} ${h*.46} L${w*.92} ${h*.42} M${w*.77} ${h*.5} L${w*.94} ${h*.54} M${w*.2} ${h*.66} Q0 ${h*.48} ${w*.09} ${h*.23}`, ...line });
-    detail(group, "path", { d:`M${w*.33} ${h*.53} Q${w*.46} ${h*.68} ${w*.6} ${h*.53}`, fill:"none", stroke:dark, "stroke-width":strokeWidth });
-  } else if (templateId === "dog") {
-    detail(group, "ellipse", { cx:w*.5, cy:h*.93, rx:w*.38, ry:h*.05, fill:PALETTE.night, opacity:.15, stroke:"none" });
-    add(group, "ellipse", { cx:w*.47, cy:h*.61, rx:w*.32, ry:h*.24, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    add(group, "circle", { cx:w*.72, cy:h*.39, r:h*.2, fill:light, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.59} ${h*.27} Q${w*.48} ${h*.05} ${w*.64} ${h*.11} M${w*.8} ${h*.26} Q${w*.94} ${h*.05} ${w*.9} ${h*.32}`, fill:dark, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "ellipse", { cx:w*.83, cy:h*.42, rx:w*.055, ry:h*.04, fill:PALETTE.deepInk, stroke:"none" });
-    detail(group, "path", { d:`M${w*.65} ${h*.38} L${w*.68} ${h*.38} M${w*.3} ${h*.72} L${w*.26} ${h*.94} M${w*.58} ${h*.72} L${w*.62} ${h*.94} M${w*.17} ${h*.55} Q0 ${h*.36} ${w*.12} ${h*.22}`, ...line, "stroke-width":strokeWidth*1.6 });
-    detail(group, "path", { d:`M${w*.36} ${h*.53} Q${w*.48} ${h*.67} ${w*.61} ${h*.53}`, ...line, stroke:dark });
-  } else if (templateId === "bird") {
-    const count=Math.max(1,Math.min(8,params.count||3));
-    repeat(group,count,index => {
-      const x=w*(.14+(index%4)*.23), y=h*(.25+Math.floor(index/4)*.38+(index%2)*.08), size=Math.min(w,h)*(.12+(index%3)*.018);
-      detail(group, "path", { d:`M${x-size} ${y} Q${x-size*.45} ${y-size*.72} ${x} ${y} Q${x+size*.45} ${y-size*.72} ${x+size} ${y}`, fill:"none", stroke:index%2?color:dark, "stroke-width":strokeWidth*1.4 });
-    });
-  } else if (templateId === "umbrella") {
-    detail(group, "ellipse", { cx:w*.52, cy:h*.46, rx:w*.44, ry:h*.06, fill:PALETTE.night, opacity:.12, stroke:"none" });
-    add(group, "path", { d:`M${w*.05} ${h*.46} Q${w*.5} ${-h*.02} ${w*.95} ${h*.46} Q${w*.84} ${h*.38} ${w*.73} ${h*.46} Q${w*.61} ${h*.36} ${w*.5} ${h*.46} Q${w*.39} ${h*.36} ${w*.27} ${h*.46} Q${w*.16} ${h*.38} ${w*.05} ${h*.46} Z`, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.5} ${h*.02} L${w*.5} ${h*.46} M${w*.5} ${h*.02} Q${w*.3} ${h*.13} ${w*.27} ${h*.46} M${w*.5} ${h*.02} Q${w*.7} ${h*.13} ${w*.73} ${h*.46}`, ...line, stroke:light, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.5} ${h*.46} L${w*.5} ${h*.88} Q${w*.5} ${h*.99} ${w*.63} ${h*.92}`, ...line, stroke:dark, "stroke-width":strokeWidth*1.8 });
-    detail(group, "circle", { cx:w*.5, cy:h*.025, r:strokeWidth*1.4, fill:accent, stroke:ink });
-  } else if (templateId === "streetlamp") {
-    detail(group, "ellipse", { cx:w*.5, cy:h*.35, rx:w*.46, ry:h*.3, fill:accent, opacity:.12, stroke:"none" });
-    detail(group, "path", { d:`M${w*.5} ${h*.26} L${w*.5} ${h*.92} M${w*.24} ${h*.95} Q${w*.5} ${h*.88} ${w*.76} ${h*.95}`, ...line, "stroke-width":strokeWidth*2.5 });
-    add(group, "path", { d:`M${w*.32} ${h*.08} L${w*.68} ${h*.08} L${w*.76} ${h*.31} Q${w*.5} ${h*.4} ${w*.24} ${h*.31} Z`, fill:accent, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.36} ${h*.12} L${w*.32} ${h*.29} M${w*.64} ${h*.12} L${w*.68} ${h*.29}`, ...line, stroke:PALETTE.cream });
-  } else if (templateId === "roof") {
-    add(group, "path", { d:`M${-w*.03} ${h*.72} L${w*.5} ${h*.06} L${w*1.03} ${h*.72} Z`, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.02} ${h*.68} L${w*.5} ${h*.12} L${w*.98} ${h*.68}`, ...line, stroke:light, "stroke-width":strokeWidth*1.8 });
-    detail(group, "rect", { x:w*.18, y:h*.66, width:w*.64, height:h*.31, rx:strokeWidth*2, fill:accent, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "rect", { x:w*.43, y:h*.73, width:w*.14, height:h*.24, fill:dark, stroke:ink });
-    detail(group, "rect", { x:w*.24, y:h*.74, width:w*.12, height:h*.12, fill:PALETTE.gold, stroke:ink });
-    detail(group, "rect", { x:w*.64, y:h*.74, width:w*.12, height:h*.12, fill:PALETTE.gold, stroke:ink });
-  } else if (templateId === "house") {
-    detail(group, "ellipse", { cx:w*.5, cy:h*.96, rx:w*.44, ry:h*.035, fill:PALETTE.night, opacity:.15, stroke:"none" });
-    add(group, "rect", { x:w*.16, y:h*.42, width:w*.68, height:h*.52, rx:strokeWidth*2, fill:accent, stroke:ink, "stroke-width":strokeWidth });
-    add(group, "path", { d:`M${w*.07} ${h*.46} L${w*.5} ${h*.08} L${w*.93} ${h*.46} Z`, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "rect", { x:w*.42, y:h*.62, width:w*.16, height:h*.32, rx:strokeWidth, fill:dark, stroke:ink, "stroke-width":strokeWidth });
-    repeat(group,2,index => detail(group, "rect", { x:w*(.23+index*.43), y:h*.57, width:w*.14, height:h*.16, fill:PALETTE.gold, stroke:ink, "stroke-width":strokeWidth }));
-    detail(group, "path", { d:`M${w*.3} ${h*.57} L${w*.3} ${h*.73} M${w*.66} ${h*.57} L${w*.66} ${h*.73}`, ...line, stroke:PALETTE.cream });
-    detail(group, "rect", { x:w*.68, y:h*.14, width:w*.1, height:h*.23, fill:dark, stroke:ink, "stroke-width":strokeWidth });
-  } else if (templateId === "bridge") {
-    detail(group, "path", { d:`M0 ${h*.8} Q${w*.5} ${h*.12} ${w} ${h*.8} L${w} ${h} L0 ${h} Z`, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.17} ${h*.82} Q${w*.5} ${h*.32} ${w*.83} ${h*.82} L${w*.73} ${h*.82} Q${w*.5} ${h*.49} ${w*.27} ${h*.82} Z`, fill:PALETTE.paper, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.08} ${h*.59} Q${w*.5} ${h*.02} ${w*.92} ${h*.59}`, ...line, stroke:accent, "stroke-width":strokeWidth*1.8 });
-    repeat(group,7,index => detail(group, "line", { x1:w*(.13+index*.12), y1:h*(.51-Math.abs(3-index)*.08), x2:w*(.13+index*.12), y2:h*(.65-Math.abs(3-index)*.045), stroke:ink, "stroke-width":strokeWidth }));
-  } else if (templateId === "boat") {
-    detail(group, "ellipse", { cx:w*.5, cy:h*.87, rx:w*.45, ry:h*.06, fill:PALETTE.night, opacity:.14, stroke:"none" });
-    add(group, "path", { d:`M${w*.08} ${h*.62} Q${w*.5} ${h*.84} ${w*.92} ${h*.62} Q${w*.8} ${h*.94} ${w*.24} ${h*.92} Z`, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "line", { x1:w*.5, y1:h*.14, x2:w*.5, y2:h*.68, stroke:ink, "stroke-width":strokeWidth*1.6 });
-    detail(group, "path", { d:`M${w*.5} ${h*.16} L${w*.5} ${h*.58} L${w*.16} ${h*.52} Z`, fill:accent, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.5} ${h*.2} L${w*.82} ${h*.55} L${w*.5} ${h*.58} Z`, fill:light, stroke:ink, "stroke-width":strokeWidth });
-  } else if (templateId === "bench") {
-    detail(group, "ellipse", { cx:w*.5, cy:h*.91, rx:w*.44, ry:h*.05, fill:PALETTE.night, opacity:.14, stroke:"none" });
-    repeat(group,3,index => detail(group, "rect", { x:w*.1, y:h*(.22+index*.14), width:w*.8, height:h*.1, rx:strokeWidth*2, fill:index%2?color:light, stroke:ink, "stroke-width":strokeWidth }));
-    detail(group, "rect", { x:w*.08, y:h*.66, width:w*.84, height:h*.13, rx:strokeWidth*2, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.18} ${h*.75} L${w*.14} ${h*.94} M${w*.82} ${h*.75} L${w*.86} ${h*.94} M${w*.16} ${h*.25} L${w*.18} ${h*.75} M${w*.84} ${h*.25} L${w*.82} ${h*.75}`, ...line, "stroke-width":strokeWidth*1.7 });
-  } else if (templateId === "bicycle") {
-    detail(group, "ellipse", { cx:w*.5, cy:h*.9, rx:w*.46, ry:h*.04, fill:PALETTE.night, opacity:.13, stroke:"none" });
-    detail(group, "circle", { cx:w*.23, cy:h*.68, r:Math.min(w,h)*.2, fill:"none", stroke:ink, "stroke-width":strokeWidth*1.5 });
-    detail(group, "circle", { cx:w*.77, cy:h*.68, r:Math.min(w,h)*.2, fill:"none", stroke:ink, "stroke-width":strokeWidth*1.5 });
-    detail(group, "path", { d:`M${w*.23} ${h*.68} L${w*.43} ${h*.37} L${w*.58} ${h*.68} Z M${w*.43} ${h*.37} L${w*.7} ${h*.36} L${w*.77} ${h*.68} M${w*.38} ${h*.32} L${w*.51} ${h*.32} M${w*.68} ${h*.36} L${w*.74} ${h*.25} L${w*.82} ${h*.25}`, ...line, stroke:color, "stroke-width":strokeWidth*1.8 });
-    detail(group, "circle", { cx:w*.58, cy:h*.68, r:strokeWidth*2.2, fill:accent, stroke:ink });
-  } else if (templateId === "fence") {
-    repeat(group,Math.max(4,Math.round(5+(params.density??.5)*5)),index => {
-      const count=Math.max(4,Math.round(5+(params.density??.5)*5)), x=index*w/(count-1);
-      detail(group, "path", { d:`M${x} ${h*.94} L${x} ${h*.18} L${x+w*.025} ${h*.08} L${x+w*.05} ${h*.18} L${x+w*.05} ${h*.94} Z`, fill:index%2?color:light, stroke:ink, "stroke-width":strokeWidth });
-    });
-    detail(group, "rect", { x:0, y:h*.42, width:w, height:h*.11, fill:accent, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "rect", { x:0, y:h*.72, width:w, height:h*.11, fill:accent, stroke:ink, "stroke-width":strokeWidth });
-  } else if (templateId === "buildings") {
-    repeat(group, 6, index => {
-      const x=index*w/6, top=h*(.12+(index%3)*.12), bw=w*.18;
-      add(group, "rect", { x, y:top, width:bw, height:h-top, rx:strokeWidth, fill:index%2?color:dark, stroke:ink, "stroke-width":strokeWidth });
-      repeat(group, 3, row => detail(group, "rect", { x:x+bw*.22, y:top+h*.1+row*h*.2, width:bw*.22, height:h*.09, fill:(index+row)%3 ? PALETTE.gold : PALETTE.night, opacity:.8, stroke:"none" }));
-      repeat(group, 3, row => detail(group, "rect", { x:x+bw*.58, y:top+h*.1+row*h*.2, width:bw*.22, height:h*.09, fill:(index+row)%2 ? PALETTE.gold : PALETTE.night, opacity:.7, stroke:"none" }));
-    });
-  } else if (templateId === "rain") {
-    const count = Math.max(4, Math.round(8 + (params.density ?? .5) * 22));
-    repeat(group, count, index => {
-      const x=(index*47)%w, y=(index*71)%h, length=h*(.045+(index%4)*.012);
-      detail(group, "line", { x1:x, y1:y, x2:x+w*.018, y2:y+length, stroke:index%3?color:light, opacity:.48+(index%4)*.12, "stroke-width":Math.max(1.2, strokeWidth*(.55+(index%3)*.22)) });
-    });
-    repeat(group, Math.max(2, Math.round(count/7)), index => detail(group, "path", { d:`M${(index*173+w*.12)%w} ${h*(.83+(index%3)*.05)} q${w*.025} ${-h*.025} ${w*.05} 0 M${(index*173+w*.145)%w} ${h*(.83+(index%3)*.05)} l0 ${-h*.04}`, ...line, stroke:light, opacity:.65 }));
-  } else if (templateId === "cloud") {
-    detail(group, "ellipse", { cx:w*.5, cy:h*.76, rx:w*.43, ry:h*.14, fill:dark, opacity:.24, stroke:"none" });
-    repeat(group, 5, index => add(group, "circle", { cx:w*(.16+index*.17), cy:h*(.61-(index%3)*.12), r:h*(.22+(index%2)*.05), fill:index%2?color:light, stroke:ink, "stroke-width":strokeWidth }));
-    detail(group, "path", { d:`M${w*.12} ${h*.69} Q${w*.5} ${h*.84} ${w*.88} ${h*.69}`, ...line, stroke:dark });
-  } else if (templateId === "sun" || templateId === "moon") {
-    detail(group, "circle", { cx:w*.5, cy:h*.5, r:Math.min(w,h)*.49, fill:color||PALETTE.gold, opacity:.16, stroke:"none" });
-    add(group, "circle", { cx:w*.5, cy:h*.5, r:Math.min(w,h)*.34, fill:color||PALETTE.gold, stroke:ink, "stroke-width":strokeWidth });
-    if (templateId === "sun") repeat(group, 10, index => {
-      const a=index*Math.PI/5, r=Math.min(w,h)*.45;
-      detail(group, "line", { x1:w*.5+Math.cos(a)*r*.84, y1:h*.5+Math.sin(a)*r*.84, x2:w*.5+Math.cos(a)*r, y2:h*.5+Math.sin(a)*r, stroke:accent, "stroke-width":strokeWidth*1.4 });
-    });
-    if (templateId === "moon") {
-      detail(group, "circle", { cx:w*.66, cy:h*.38, r:Math.min(w,h)*.33, fill:PALETTE.paper, stroke:"none" });
-      detail(group, "circle", { cx:w*.36, cy:h*.42, r:Math.min(w,h)*.045, fill:dark, opacity:.25, stroke:"none" });
-    }
-  } else if (templateId === "stars") {
-    const count = Math.max(3, Math.min(30, params.count || Math.round(6+(params.density??.5)*18)));
-    repeat(group, count, index => {
-      const x=(index*73)%w, y=(index*41)%h, r=2+(index%3);
-      detail(group, "path", { d:`M${x-r*2} ${y} L${x+r*2} ${y} M${x} ${y-r*2} L${x} ${y+r*2}`, stroke:color||PALETTE.gold, "stroke-width":r*.75, opacity:.65+(index%3)*.15 });
-    });
-  } else if (templateId === "tree") {
-    detail(group, "ellipse", { cx:w*.5, cy:h*.97, rx:w*.38, ry:h*.035, fill:PALETTE.night, opacity:.15, stroke:"none" });
-    add(group, "path", { d:`M${w*.42} ${h*.96} Q${w*.48} ${h*.63} ${w*.38} ${h*.42} Q${w*.5} ${h*.5} ${w*.62} ${h*.42} Q${w*.52} ${h*.63} ${w*.58} ${h*.96} Z`, fill:accent, stroke:ink, "stroke-width":strokeWidth });
-    repeat(group, 7, index => add(group, "circle", { cx:w*(.2+(index%4)*.2), cy:h*(.18+Math.floor(index/4)*.22+(index%2)*.05), r:h*(.19+(index%3)*.025), fill:index%3?color:light, stroke:ink, "stroke-width":strokeWidth }));
-    repeat(group, 5, index => detail(group, "circle", { cx:w*(.25+(index%3)*.23), cy:h*(.17+(index%2)*.25), r:h*.025, fill:index%2?accent:PALETTE.gold, stroke:"none" }));
-  } else if (templateId === "mountain") {
-    detail(group, "path", { d:`M0 ${h} L${w*.22} ${h*.34} L${w*.42} ${h} Z`, fill:light, stroke:ink, "stroke-width":strokeWidth });
-    add(group, "path", { d:`M${w*.16} ${h} L${w*.5} ${h*.08} L${w*.72} ${h*.58} L${w*.82} ${h*.28} L${w} ${h} Z`, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.39} ${h*.38} L${w*.5} ${h*.08} L${w*.62} ${h*.35} L${w*.54} ${h*.3} L${w*.48} ${h*.38} Z`, fill:PALETTE.paper, stroke:ink, "stroke-width":strokeWidth*.7 });
-    detail(group, "path", { d:`M${w*.54} ${h*.3} L${w*.7} ${h*.78} L${w*.62} ${h*.35} Z`, fill:dark, opacity:.42, stroke:"none" });
-  } else if (templateId === "flowers") {
-    const count = Math.max(3, Math.min(24, params.count || 10));
-    repeat(group, count, index => {
-      const x=(index*67)%w, y=h*.35+(index%4)*h*.15;
-      detail(group, "path", { d:`M${x} ${h} Q${x-w*.03} ${h*.65} ${x} ${y}`, fill:"none", stroke:PALETTE.moss, "stroke-width":Math.max(1.5,strokeWidth) });
-      repeat(group, 5, petal => {
-        const a=petal*Math.PI*2/5;
-        detail(group, "circle", { cx:x+Math.cos(a)*h*.055, cy:y+Math.sin(a)*h*.055, r:Math.max(2,h*.045), fill:index%2?color:accent, stroke:ink, "stroke-width":strokeWidth*.5 });
-      });
-      detail(group, "circle", { cx:x, cy:y, r:Math.max(2,h*.03), fill:PALETTE.gold, stroke:"none" });
-    });
-  } else if (templateId === "river" || templateId === "street") {
-    add(group, "path", { d:`M0 ${h*.22} Q${w*.35} ${h*.73} ${w*.55} ${h*.34} T${w} ${h*.52} L${w} ${h} Q${w*.65} ${h*.68} ${w*.45} ${h*.92} T0 ${h*.7} Z`, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    repeat(group, 4, index => detail(group, "path", { d:`M${w*(.08+index*.22)} ${h*(.48+(index%2)*.17)} q${w*.08} ${h*.06} ${w*.16} 0`, ...line, stroke:templateId==="street"?accent:light, opacity:.75, "stroke-width":strokeWidth*(templateId==="street"?1.5:1) }));
-  } else if (templateId === "grass") {
-    add(group, "path", { d:`M0 ${h*.42} Q${w*.22} ${h*.25} ${w*.45} ${h*.4} T${w} ${h*.34} L${w} ${h} L0 ${h} Z`, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    repeat(group, 22, index => {
-      const x=index*w/21, top=h*(.2+(index%5)*.035);
-      detail(group, "path", { d:`M${x} ${h*.67} Q${x-w*.015} ${h*.42} ${x-w*.025} ${top} M${x} ${h*.67} Q${x+w*.018} ${h*.43} ${x+w*.035} ${top+h*.04}`, ...line, stroke:index%3?dark:accent, "stroke-width":strokeWidth*.65 });
-    });
-  } else if (templateId === "puddle") {
-    detail(group, "ellipse", { cx:w*.5, cy:h*.62, rx:w*.48, ry:h*.31, fill:PALETTE.night, opacity:.13, stroke:"none" });
-    add(group, "path", { d:`M${w*.05} ${h*.55} Q${w*.18} ${h*.24} ${w*.39} ${h*.36} Q${w*.58} ${h*.18} ${w*.75} ${h*.41} Q${w*.96} ${h*.42} ${w*.92} ${h*.68} Q${w*.7} ${h*.93} ${w*.48} ${h*.78} Q${w*.2} ${h*.94} ${w*.05} ${h*.55} Z`, fill:color, stroke:ink, "stroke-width":strokeWidth });
-    detail(group, "path", { d:`M${w*.2} ${h*.52} Q${w*.38} ${h*.42} ${w*.56} ${h*.5} M${w*.47} ${h*.65} Q${w*.65} ${h*.57} ${w*.78} ${h*.64}`, ...line, stroke:light, opacity:.85 });
+  const ns = namespace || "canvas";
+
+  const defs = node("defs");
+
+  // Primary gradient
+  const g1 = node("linearGradient", {
+    id: namespaceId(ns, `grad-${entity.id}`),
+    x1: "0", y1: "0", x2: "1", y2: "1",
+    gradientTransform: "rotate(25)"
+  });
+  g1.appendChild(node("stop", { offset: "0%", "stop-color": shade(color, 20), "stop-opacity": "1" }));
+  g1.appendChild(node("stop", { offset: "45%", "stop-color": color, "stop-opacity": "1" }));
+  g1.appendChild(node("stop", { offset: "100%", "stop-color": shade(color, -25), "stop-opacity": "1" }));
+  defs.appendChild(g1);
+
+  // Shadow gradient
+  const g2 = node("linearGradient", {
+    id: namespaceId(ns, `shadow-${entity.id}`),
+    x1: "0", y1: "0", x2: "1", y2: "1"
+  });
+  g2.appendChild(node("stop", { offset: "0%", "stop-color": PALETTE.night, "stop-opacity": "0.25" }));
+  g2.appendChild(node("stop", { offset: "100%", "stop-color": PALETTE.night, "stop-opacity": "0.05" }));
+  defs.appendChild(g2);
+
+  // Highlight gradient (radial)
+  const g3 = node("radialGradient", {
+    id: namespaceId(ns, `highlight-${entity.id}`),
+    cx: "40%", cy: "30%", r: "60%"
+  });
+  g3.appendChild(node("stop", { offset: "0%", "stop-color": PALETTE.cream, "stop-opacity": "0.4" }));
+  g3.appendChild(node("stop", { offset: "100%", "stop-color": PALETTE.cream, "stop-opacity": "0" }));
+  defs.appendChild(g3);
+
+  group.appendChild(defs);
+  return defs;
+}
+
+function penLine(group, points, options = {}) {
+  const d = penPath(points, options);
+  if (!d) return null;
+  return createPenElement(globalThis.document || { createElementNS: () => node("path") }, d, options);
+}
+
+function penLineToGroup(group, points, options = {}) {
+  const d = penPath(points, options);
+  if (!d) return;
+  const el = node("path", {
+    d,
+    fill: "none",
+    stroke: options.stroke || PALETTE.ink,
+    "stroke-width": ((options.baseWidth || 2.5) * (LINE_TIERS[options.tier] || LINE_TIERS.structure).width).toFixed(2),
+    opacity: (options.opacity || (LINE_TIERS[options.tier] || LINE_TIERS.structure).opacity).toFixed(2),
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "data-line-tier": (options.tier || "structure")
+  });
+  if (LINE_TIERS[options.tier] && LINE_TIERS[options.tier].dash !== "none") {
+    el.setAttribute("stroke-dasharray", LINE_TIERS[options.tier].dash);
   }
+  group.appendChild(el);
+  return el;
+}
+
+function shadowEllipse(group, cx, cy, rx, ry, fill, opacity) {
+  add(group, "ellipse", {
+    cx: cx.toFixed(1), cy: cy.toFixed(1),
+    rx: rx.toFixed(1), ry: ry.toFixed(1),
+    fill: fill || PALETTE.night,
+    opacity: (opacity || 0.15).toFixed(2),
+    stroke: "none",
+    "data-shadow": "contact"
+  });
+}
+
+function buildQuality(entity, quality) {
+  return (quality === "full") ? "full" : "base";
+}
+
+// ==================== ENTITY TEMPLATES ====================
+
+function renderPerson(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.deepBlue;
+  const accent = params.accent || PALETTE.warm;
+  const variant = params.variant || "neutral";
+  const pose = params.pose || "standing";
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "person");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "person", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  // Shadow
+  shadowEllipse(group, w * 0.5, h * 0.96, w * 0.3, h * 0.025, PALETTE.night, 0.18);
+
+  // Legs
+  const legPoints = pose === "walking"
+    ? [[w * 0.44, h * 0.68], [w * 0.36, h * 0.94], [w * 0.4, h * 0.96],
+       [w * 0.54, h * 0.68], [w * 0.66, h * 0.94], [w * 0.7, h * 0.96]]
+    : [[w * 0.44, h * 0.7], [w * 0.40, h * 0.94], [w * 0.42, h * 0.95],
+       [w * 0.56, h * 0.7], [w * 0.60, h * 0.94], [w * 0.58, h * 0.95]];
+
+  penLineToGroup(group, legPoints.slice(0, 3), { tier: "outline", baseWidth: sw, stroke: ink, rng });
+  penLineToGroup(group, legPoints.slice(3), { tier: "outline", baseWidth: sw, stroke: ink, rng });
+
+  // Feet
+  const isWoman = variant === "woman";
+  const lfx = pose === "walking" ? w * 0.30 : w * 0.36;
+  const rfx = pose === "walking" ? w * 0.72 : w * 0.60;
+  penLineToGroup(group, [[lfx - w * 0.04, h * 0.96], [lfx + w * 0.06, h * 0.96], [lfx + w * 0.08, h * 0.94]],
+    { tier: "outline", baseWidth: sw * 1.2, stroke: PALETTE.deepInk, rng });
+  penLineToGroup(group, [[rfx - w * 0.04, h * 0.96], [rfx + w * 0.06, h * 0.96], [rfx + w * 0.08, h * 0.94]],
+    { tier: "outline", baseWidth: sw * 1.2, stroke: PALETTE.deepInk, rng });
+
+  // Body / torso
+  const bodyPath = isWoman
+    ? [[w * 0.35, h * 0.35], [w * 0.30, h * 0.50], [w * 0.28, h * 0.68],
+       [w * 0.72, h * 0.68], [w * 0.70, h * 0.50], [w * 0.65, h * 0.35]]
+    : [[w * 0.38, h * 0.32], [w * 0.34, h * 0.50], [w * 0.36, h * 0.68],
+       [w * 0.64, h * 0.68], [w * 0.66, h * 0.50], [w * 0.62, h * 0.32]];
+
+  // Body fill
+  add(group, "path", {
+    d: `M${bodyPath.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ")} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`,
+    stroke: "none",
+    "data-color-block": "body"
+  });
+
+  penLineToGroup(group, bodyPath.concat([bodyPath[0]]), {
+    tier: "outline", baseWidth: sw, stroke: ink, rng, closed: true
+  });
+
+  // Belt / waist line
+  if (isFull) {
+    penLineToGroup(group, [[w * 0.35, h * 0.50], [w * 0.50, h * 0.51], [w * 0.65, h * 0.50]],
+      { tier: "structure", baseWidth: sw * 0.8, stroke: accent, rng });
+  }
+
+  // Arms
+  const armRelaxed = pose !== "walking";
+  const lShoulderX = w * 0.34, lShoulderY = h * 0.38;
+  const rShoulderX = w * 0.66, rShoulderY = h * 0.38;
+  const lElbowX = armRelaxed ? w * 0.20 : w * 0.28, lElbowY = armRelaxed ? h * 0.52 : h * 0.46;
+  const lHandX = armRelaxed ? w * 0.16 : w * 0.22, lHandY = armRelaxed ? h * 0.66 : h * 0.60;
+  const rElbowX = armRelaxed ? w * 0.80 : w * 0.72, rElbowY = armRelaxed ? h * 0.52 : h * 0.46;
+  const rHandX = armRelaxed ? w * 0.84 : w * 0.78, rHandY = armRelaxed ? h * 0.66 : h * 0.60;
+
+  penLineToGroup(group, [[lShoulderX, lShoulderY], [lElbowX, lElbowY], [lHandX, lHandY]],
+    { tier: "outline", baseWidth: sw * 0.75, stroke: ink, rng });
+  penLineToGroup(group, [[rShoulderX, rShoulderY], [rElbowX, rElbowY], [rHandX, rHandY]],
+    { tier: "outline", baseWidth: sw * 0.75, stroke: ink, rng });
+
+  if (isFull) {
+    // Arm structure lines
+    penLineToGroup(group, [[lElbowX, lElbowY - h * 0.02], [lElbowX, lElbowY + h * 0.02]],
+      { tier: "structure", baseWidth: sw * 0.45, stroke: PALETTE.deepInk, rng });
+    penLineToGroup(group, [[rElbowX, rElbowY - h * 0.02], [rElbowX, rElbowY + h * 0.02]],
+      { tier: "structure", baseWidth: sw * 0.45, stroke: PALETTE.deepInk, rng });
+  }
+
+  // Head
+  add(group, "ellipse", {
+    cx: (w * 0.5).toFixed(1), cy: (h * 0.20).toFixed(1),
+    rx: (w * 0.11).toFixed(1), ry: (h * 0.11).toFixed(1),
+    fill: PALETTE.skin, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Hair
+  const hairColor = variant === "woman" ? PALETTE.deepInk : shade(PALETTE.deepInk, -10);
+  const hairPath = isWoman
+    ? [[w * 0.37, h * 0.18], [w * 0.36, h * 0.10], [w * 0.45, h * 0.06],
+       [w * 0.55, h * 0.06], [w * 0.64, h * 0.10], [w * 0.63, h * 0.18],
+       [w * 0.60, h * 0.14], [w * 0.50, h * 0.12], [w * 0.40, h * 0.14]]
+    : [[w * 0.38, h * 0.18], [w * 0.39, h * 0.12], [w * 0.46, h * 0.09],
+       [w * 0.54, h * 0.09], [w * 0.62, h * 0.12], [w * 0.62, h * 0.18]];
+
+  add(group, "path", {
+    d: `M${hairPath.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" L")} Z`,
+    fill: hairColor, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  if (isFull) {
+    // Facial features
+    const faceLeft = w * 0.43, faceRight = w * 0.57, faceY = h * 0.21;
+    penLineToGroup(group, [[faceLeft, faceY], [faceLeft + w * 0.015, faceY - h * 0.01]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: ink, rng });
+    penLineToGroup(group, [[faceRight, faceY], [faceRight - w * 0.015, faceY - h * 0.01]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: ink, rng });
+    // Mouth
+    penLineToGroup(group, [[w * 0.48, h * 0.26], [w * 0.50, h * 0.265], [w * 0.52, h * 0.26]],
+      { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.rose, rng });
+    // Hair detail
+    repeat(group, isWoman ? 5 : 3, i => {
+      penLineToGroup(group, [[w * (0.39 + i * 0.05), h * 0.12], [w * (0.40 + i * 0.05), h * 0.08]],
+        { tier: "texture", baseWidth: sw * 0.35, stroke: hairColor, rng });
+    });
+  }
+
+  // Skirt for woman variant
+  if (isWoman) {
+    const skirtTop = h * 0.50;
+    add(group, "path", {
+      d: `M${(w * 0.33).toFixed(1)} ${skirtTop.toFixed(1)} L${(w * 0.20).toFixed(1)} ${(h * 0.84).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.92).toFixed(1)} ${(w * 0.80).toFixed(1)} ${(h * 0.84).toFixed(1)} L${(w * 0.67).toFixed(1)} ${skirtTop.toFixed(1)} Z`,
+      fill: shade(color, 12), stroke: ink, "stroke-width": sw.toFixed(2)
+    });
+    if (isFull) {
+      repeat(group, 6, i => {
+        penLineToGroup(group, [[w * (0.25 + i * 0.09), skirtTop + h * 0.02], [w * (0.22 + i * 0.09), h * 0.82]],
+          { tier: "texture", baseWidth: sw * 0.3, stroke: shade(color, -10), rng });
+      });
+    }
+  }
+
   return group;
 }
 
-export function renderEntity(entity) {
-  if (!(entity.templateId in ENTITY_TEMPLATES)) throw new Error("未知实体模板");
-  const group = renderTemplate(entity);
+function renderCat(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.warm;
+  const accent = params.accent || PALETTE.rose;
+  const pose = params.pose || "sitting";
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "cat");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "cat", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  shadowEllipse(group, w * 0.48, h * 0.93, w * 0.38, h * 0.05);
+
+  // Body
+  add(group, "ellipse", {
+    cx: (w * 0.46).toFixed(1), cy: (h * 0.63).toFixed(1),
+    rx: (w * 0.33).toFixed(1), ry: (h * 0.26).toFixed(1),
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Head
+  add(group, "circle", {
+    cx: (w * 0.68).toFixed(1), cy: (h * 0.36).toFixed(1),
+    r: (h * 0.21).toFixed(1),
+    fill: shade(color, 15), stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Ears
+  penLineToGroup(group, [[w * 0.58, h * 0.22], [w * 0.63, h * 0.02], [w * 0.70, h * 0.20]],
+    { tier: "outline", baseWidth: sw, stroke: ink, rng });
+  penLineToGroup(group, [[w * 0.76, h * 0.18], [w * 0.83, h * 0.02], [w * 0.86, h * 0.22]],
+    { tier: "outline", baseWidth: sw, stroke: ink, rng });
+
+  // Tail
+  const tailCurve = isFull
+    ? [[w * 0.20, h * 0.66], [w * 0.06, h * 0.52], [w * 0.01, h * 0.35], [w * 0.10, h * 0.22]]
+    : [[w * 0.20, h * 0.66], [w * 0.08, h * 0.48], [w * 0.10, h * 0.28]];
+  penLineToGroup(group, tailCurve, {
+    tier: "outline", baseWidth: sw * 0.7, stroke: ink, rng
+  });
+
+  if (isFull) {
+    // Face
+    penLineToGroup(group, [[w * 0.62, h * 0.36], [w * 0.65, h * 0.37]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: ink, rng });
+    penLineToGroup(group, [[w * 0.74, h * 0.36], [w * 0.77, h * 0.37]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: ink, rng });
+    penLineToGroup(group, [[w * 0.68, h * 0.42], [w * 0.70, h * 0.44], [w * 0.73, h * 0.42]],
+      { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.rose, rng });
+    // Whiskers
+    const whiskerBase = [w * 0.68, h * 0.40];
+    repeat(group, 6, i => {
+      const a = -0.5 + i * 0.2;
+      penLineToGroup(group, [whiskerBase, [whiskerBase[0] + Math.cos(a) * w * 0.18, whiskerBase[1] + Math.sin(a) * h * 0.04]],
+        { tier: "texture", baseWidth: sw * 0.25, stroke: ink, rng });
+    });
+    // Fur texture
+    repeat(group, 8, i => {
+      const furX = w * (0.22 + i * 0.06), furY = h * (0.50 + (i % 3) * 0.06);
+      penLineToGroup(group, [[furX, furY], [furX + w * 0.02, furY - h * 0.02]],
+        { tier: "texture", baseWidth: sw * 0.2, stroke: shade(color, -10), rng });
+    });
+    // Stripe markings
+    repeat(group, 4, i => {
+      penLineToGroup(group, [[w * (0.28 + i * 0.08), h * 0.55], [w * (0.26 + i * 0.08), h * 0.60]],
+        { tier: "structure", baseWidth: sw * 0.4, stroke: shade(color, -20), rng });
+    });
+  }
+
+  return group;
+}
+
+function renderDog(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.warm;
+  const accent = params.accent || PALETTE.gold;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "dog");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "dog", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  shadowEllipse(group, w * 0.5, h * 0.94, w * 0.4, h * 0.05);
+
+  // Body
+  add(group, "ellipse", {
+    cx: (w * 0.47).toFixed(1), cy: (h * 0.62).toFixed(1),
+    rx: (w * 0.34).toFixed(1), ry: (h * 0.25).toFixed(1),
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Head
+  add(group, "circle", {
+    cx: (w * 0.72).toFixed(1), cy: (h * 0.40).toFixed(1),
+    r: (h * 0.21).toFixed(1),
+    fill: shade(color, 12), stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Snout
+  add(group, "ellipse", {
+    cx: (w * 0.82).toFixed(1), cy: (h * 0.46).toFixed(1),
+    rx: (w * 0.10).toFixed(1), ry: (h * 0.08).toFixed(1),
+    fill: shade(color, 5), stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Ears (floppy)
+  penLineToGroup(group, [[w * 0.62, h * 0.28], [w * 0.52, h * 0.12], [w * 0.62, h * 0.20]],
+    { tier: "outline", baseWidth: sw * 0.8, stroke: ink, rng });
+  penLineToGroup(group, [[w * 0.78, h * 0.26], [w * 0.88, h * 0.10], [w * 0.84, h * 0.30]],
+    { tier: "outline", baseWidth: sw * 0.8, stroke: ink, rng });
+
+  // Legs
+  penLineToGroup(group, [[w * 0.30, h * 0.72], [w * 0.26, h * 0.94]],
+    { tier: "outline", baseWidth: sw * 1.1, stroke: PALETTE.deepInk, rng });
+  penLineToGroup(group, [[w * 0.58, h * 0.72], [w * 0.63, h * 0.94]],
+    { tier: "outline", baseWidth: sw * 1.1, stroke: PALETTE.deepInk, rng });
+
+  // Tail
+  penLineToGroup(group, [[w * 0.17, h * 0.56], [w * 0.04, h * 0.40], [w * 0.12, h * 0.26]],
+    { tier: "outline", baseWidth: sw * 0.7, stroke: ink, rng });
+
+  if (isFull) {
+    // Eye
+    add(group, "circle", { cx: (w * 0.83).toFixed(1), cy: (h * 0.42).toFixed(1), r: (sw * 0.6).toFixed(2), fill: PALETTE.deepInk, stroke: "none" });
+    // Mouth line
+    penLineToGroup(group, [[w * 0.80, h * 0.50], [w * 0.84, h * 0.48]],
+      { tier: "structure", baseWidth: sw * 0.4, stroke: ink, rng });
+    // Fur detail
+    repeat(group, 6, i => {
+      penLineToGroup(group, [[w * (0.28 + i * 0.07), h * 0.68], [w * (0.30 + i * 0.07), h * 0.72]],
+        { tier: "texture", baseWidth: sw * 0.22, stroke: shade(color, -10), rng });
+    });
+    // Paw detail
+    penLineToGroup(group, [[w * 0.22, h * 0.95], [w * 0.24, h * 0.93], [w * 0.27, h * 0.95]],
+      { tier: "structure", baseWidth: sw * 0.3, stroke: PALETTE.deepInk, rng });
+    penLineToGroup(group, [[w * 0.59, h * 0.95], [w * 0.61, h * 0.93], [w * 0.64, h * 0.95]],
+      { tier: "structure", baseWidth: sw * 0.3, stroke: PALETTE.deepInk, rng });
+  }
+
+  return group;
+}
+
+function renderBird(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.blue;
+  const count = Math.max(1, Math.min(8, params.count || 3));
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "bird");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "bird", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.5, Math.min(w, h) * 0.015);
+
+  repeat(group, count, index => {
+    const x = w * (0.14 + (index % 4) * 0.23);
+    const y = h * (0.25 + Math.floor(index / 4) * 0.38 + (index % 2) * 0.08);
+    const size = Math.min(w, h) * (0.12 + (index % 3) * 0.02);
+
+    // Wing arc
+    penLineToGroup(group, [
+      [x - size * 1.5, y],
+      [x - size * 0.6, y - size * 0.8],
+      [x + size * 0.2, y - size * 0.1],
+      [x + size * 1.5, y],
+      [x + size * 0.6, y + size * 0.3],
+      [x - size * 0.1, y + size * 0.05]
+    ], {
+      tier: "outline", baseWidth: sw * 1.2, stroke: index % 2 ? color : shade(color, -15), rng: createRNG(entity.id, `bird-${index}`)
+    });
+
+    if (isFull) {
+      // Wing feather details
+      penLineToGroup(group, [
+        [x - size * 0.5, y - size * 0.2],
+        [x + size * 0.5, y - size * 0.3]
+      ], {
+        tier: "structure", baseWidth: sw * 0.4, stroke: shade(color, -20), rng: createRNG(entity.id, `bird-feather-${index}`)
+      });
+    }
+  });
+
+  return group;
+}
+
+function renderUmbrella(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.rose;
+  const accent = params.accent || PALETTE.gold;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "umbrella");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "umbrella", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  // Shadow disk
+  shadowEllipse(group, w * 0.52, h * 0.48, w * 0.46, h * 0.07);
+
+  // Canopy
+  add(group, "path", {
+    d: `M${(w * 0.05).toFixed(1)} ${(h * 0.48).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(-h * 0.04).toFixed(1)} ${(w * 0.95).toFixed(1)} ${(h * 0.48).toFixed(1)} Q${(w * 0.84).toFixed(1)} ${(h * 0.40).toFixed(1)} ${(w * 0.73).toFixed(1)} ${(h * 0.48).toFixed(1)} Q${(w * 0.61).toFixed(1)} ${(h * 0.38).toFixed(1)} ${(w * 0.50).toFixed(1)} ${(h * 0.48).toFixed(1)} Q${(w * 0.39).toFixed(1)} ${(h * 0.38).toFixed(1)} ${(w * 0.27).toFixed(1)} ${(h * 0.48).toFixed(1)} Q${(w * 0.16).toFixed(1)} ${(h * 0.40).toFixed(1)} ${(w * 0.05).toFixed(1)} ${(h * 0.48).toFixed(1)} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Handle
+  penLineToGroup(group, [[w * 0.50, h * 0.48], [w * 0.50, h * 0.88], [w * 0.50, h * 0.92], [w * 0.58, h * 0.90]],
+    { tier: "outline", baseWidth: sw * 1.6, stroke: PALETTE.deepInk, rng });
+
+  // Top tip
+  add(group, "circle", {
+    cx: (w * 0.50).toFixed(1), cy: (h * 0.03).toFixed(1),
+    r: (sw * 1.4).toFixed(2), fill: accent, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  if (isFull) {
+    // Rib lines
+    repeat(group, 7, i => {
+      const x = w * (0.16 + i * 0.10);
+      penLineToGroup(group, [[w * 0.50, h * 0.04], [x, h * 0.46]],
+        { tier: "structure", baseWidth: sw * 0.45, stroke: shade(color, -15), rng });
+    });
+    // Handle grip
+    penLineToGroup(group, [[w * 0.48, h * 0.84], [w * 0.52, h * 0.84]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: accent, rng });
+  }
+
+  return group;
+}
+
+function renderStreetlamp(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.night;
+  const accent = params.accent || PALETTE.gold;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "lamp");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "streetlamp", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.017);
+
+  // Light glow
+  add(group, "ellipse", {
+    cx: (w * 0.50).toFixed(1), cy: (h * 0.34).toFixed(1),
+    rx: (w * 0.48).toFixed(1), ry: (h * 0.32).toFixed(1),
+    fill: accent, opacity: "0.12", stroke: "none"
+  });
+
+  // Pole
+  penLineToGroup(group, [[w * 0.50, h * 0.28], [w * 0.50, h * 0.92]],
+    { tier: "outline", baseWidth: sw * 2.2, stroke: ink, rng });
+
+  // Base
+  penLineToGroup(group, [[w * 0.28, h * 0.95], [w * 0.50, h * 0.90], [w * 0.72, h * 0.95]],
+    { tier: "outline", baseWidth: sw * 2.0, stroke: ink, rng });
+
+  // Lamp housing
+  add(group, "path", {
+    d: `M${(w * 0.34).toFixed(1)} ${(h * 0.10).toFixed(1)} L${(w * 0.66).toFixed(1)} ${(h * 0.10).toFixed(1)} L${(w * 0.74).toFixed(1)} ${(h * 0.32).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.40).toFixed(1)} ${(w * 0.26).toFixed(1)} ${(h * 0.32).toFixed(1)} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  if (isFull) {
+    // Cross braces
+    penLineToGroup(group, [[w * 0.40, h * 0.16], [w * 0.60, h * 0.28]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: shade(PALETTE.night, 20), rng });
+    penLineToGroup(group, [[w * 0.60, h * 0.16], [w * 0.40, h * 0.28]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: shade(PALETTE.night, 20), rng });
+    // Light bulb indication
+    add(group, "circle", {
+      cx: (w * 0.50).toFixed(1), cy: (h * 0.34).toFixed(1),
+      r: (sw * 1.5).toFixed(2), fill: PALETTE.cream, opacity: "0.9", stroke: "none"
+    });
+    // Pole texture
+    penLineToGroup(group, [[w * 0.50, h * 0.45], [w * 0.50, h * 0.55]],
+      { tier: "texture", baseWidth: sw * 0.3, stroke: shade(PALETTE.night, 30), rng });
+    penLineToGroup(group, [[w * 0.50, h * 0.65], [w * 0.50, h * 0.75]],
+      { tier: "texture", baseWidth: sw * 0.3, stroke: shade(PALETTE.night, 30), rng });
+  }
+
+  return group;
+}
+
+function renderRoof(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.brick;
+  const accent = params.accent || PALETTE.warm;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "roof");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "roof", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  // Main roof triangle
+  add(group, "path", {
+    d: `M${(-w * 0.03).toFixed(1)} ${(h * 0.74).toFixed(1)} L${(w * 0.50).toFixed(1)} ${(h * 0.08).toFixed(1)} L${(w * 1.03).toFixed(1)} ${(h * 0.74).toFixed(1)} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Eaves overhang
+  add(group, "rect", {
+    x: (w * 0.20).toFixed(1), y: (h * 0.68).toFixed(1),
+    width: (w * 0.60).toFixed(1), height: (h * 0.30).toFixed(1),
+    rx: (sw * 2).toFixed(1), fill: accent, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  if (isFull) {
+    // Ridge line
+    penLineToGroup(group, [[w * 0.02, h * 0.70], [w * 0.50, h * 0.14], [w * 0.98, h * 0.70]],
+      { tier: "structure", baseWidth: sw * 1.2, stroke: shade(color, -20), rng });
+
+    // Tile lines
+    repeat(group, 6, i => {
+      penLineToGroup(group, [[w * (0.10 + i * 0.13), h * 0.74], [w * 0.50, h * (0.20 + i * 0.06)]],
+        { tier: "texture", baseWidth: sw * 0.3, stroke: shade(color, -10), rng });
+    });
+
+    // Window
+    add(group, "rect", {
+      x: (w * 0.44).toFixed(1), y: (h * 0.74).toFixed(1),
+      width: (w * 0.12).toFixed(1), height: (h * 0.22).toFixed(1),
+      fill: PALETTE.night, stroke: ink, "stroke-width": sw.toFixed(2)
+    });
+
+    // Side windows
+    add(group, "rect", { x: (w * 0.26).toFixed(1), y: (h * 0.75).toFixed(1), width: (w * 0.10).toFixed(1), height: (h * 0.10).toFixed(1), fill: PALETTE.gold, stroke: ink, "stroke-width": sw.toFixed(2) });
+    add(group, "rect", { x: (w * 0.64).toFixed(1), y: (h * 0.75).toFixed(1), width: (w * 0.10).toFixed(1), height: (h * 0.10).toFixed(1), fill: PALETTE.gold, stroke: ink, "stroke-width": sw.toFixed(2) });
+  }
+
+  return group;
+}
+
+function renderHouse(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.warm;
+  const accent = params.accent || PALETTE.brick;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "house");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "house", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  shadowEllipse(group, w * 0.50, h * 0.97, w * 0.46, h * 0.035);
+
+  // Walls
+  add(group, "rect", {
+    x: (w * 0.18).toFixed(1), y: (h * 0.44).toFixed(1),
+    width: (w * 0.64).toFixed(1), height: (h * 0.50).toFixed(1),
+    rx: (sw * 2).toFixed(1), fill: accent, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Roof
+  add(group, "path", {
+    d: `M${(w * 0.08).toFixed(1)} ${(h * 0.48).toFixed(1)} L${(w * 0.50).toFixed(1)} ${(h * 0.10).toFixed(1)} L${(w * 0.92).toFixed(1)} ${(h * 0.48).toFixed(1)} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Door
+  add(group, "rect", {
+    x: (w * 0.43).toFixed(1), y: (h * 0.64).toFixed(1),
+    width: (w * 0.14).toFixed(1), height: (h * 0.30).toFixed(1),
+    rx: sw.toFixed(1), fill: shade(color, -15), stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  if (isFull) {
+    // Windows
+    repeat(group, 2, i => {
+      add(group, "rect", { x: (w * (0.24 + i * 0.42)).toFixed(1), y: (h * 0.58).toFixed(1), width: (w * 0.12).toFixed(1), height: (h * 0.14).toFixed(1), fill: PALETTE.gold, stroke: ink, "stroke-width": sw.toFixed(2) });
+      // Window cross
+      penLineToGroup(group, [[w * (0.30 + i * 0.42), h * 0.58], [w * (0.30 + i * 0.42), h * 0.72]],
+        { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.night, rng });
+      penLineToGroup(group, [[w * (0.24 + i * 0.42), h * 0.65], [w * (0.36 + i * 0.42), h * 0.65]],
+        { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.night, rng });
+    });
+
+    // Chimney
+    add(group, "rect", { x: (w * 0.68).toFixed(1), y: (h * 0.16).toFixed(1), width: (w * 0.09).toFixed(1), height: (h * 0.22).toFixed(1), fill: shade(color, -20), stroke: ink, "stroke-width": sw.toFixed(2) });
+
+    // Wall texture
+    repeat(group, 5, i => {
+      penLineToGroup(group, [[w * (0.22 + i * 0.11), h * 0.76], [w * (0.24 + i * 0.11), h * 0.70]],
+        { tier: "texture", baseWidth: sw * 0.2, stroke: shade(accent, -15), rng });
+    });
+
+    // Door knob
+    add(group, "circle", { cx: (w * 0.53).toFixed(1), cy: (h * 0.80).toFixed(1), r: (sw * 0.6).toFixed(2), fill: PALETTE.gold, stroke: "none" });
+  }
+
+  return group;
+}
+
+function renderBridge(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.stone;
+  const accent = params.accent || PALETTE.warm;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "bridge");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "bridge", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  // Arch body
+  add(group, "path", {
+    d: `M0 ${(h * 0.82).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.14).toFixed(1)} ${w} ${(h * 0.82).toFixed(1)} L${w} ${h} L0 ${h} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Road surface
+  add(group, "path", {
+    d: `M${(w * 0.18).toFixed(1)} ${(h * 0.84).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.34).toFixed(1)} ${(w * 0.82).toFixed(1)} ${(h * 0.84).toFixed(1)} L${(w * 0.72).toFixed(1)} ${(h * 0.84).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.52).toFixed(1)} ${(w * 0.28).toFixed(1)} ${(h * 0.84).toFixed(1)} Z`,
+    fill: PALETTE.paper, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  if (isFull) {
+    // Guard rail
+    penLineToGroup(group, [[w * 0.10, h * 0.60], [w * 0.50, h * 0.08], [w * 0.90, h * 0.60]],
+      { tier: "structure", baseWidth: sw * 1.4, stroke: accent, rng });
+
+    // Support cables/struts
+    repeat(group, 7, i => {
+      penLineToGroup(group, [[w * (0.14 + i * 0.11), h * (0.53 - Math.abs(3 - i) * 0.08)],
+        [w * (0.14 + i * 0.11), h * (0.66 - Math.abs(3 - i) * 0.04)]],
+        { tier: "structure", baseWidth: sw * 0.7, stroke: ink, rng });
+    });
+
+    // Stone texture
+    repeat(group, 10, i => {
+      const bx = w * (0.05 + i * 0.09), by = h * (0.70 + (i % 3) * 0.06);
+      penLineToGroup(group, [[bx, by], [bx + w * 0.04, by - h * 0.01]],
+        { tier: "texture", baseWidth: sw * 0.2, stroke: shade(color, -10), rng });
+    });
+
+    // Water reflection hint
+    add(group, "path", {
+      d: `M0 ${(h * 0.90).toFixed(1)} Q${(w * 0.25).toFixed(1)} ${(h * 0.86).toFixed(1)} ${(w * 0.50).toFixed(1)} ${(h * 0.90).toFixed(1)} Q${(w * 0.75).toFixed(1)} ${(h * 0.94).toFixed(1)} ${w} ${(h * 0.90).toFixed(1)}`,
+      fill: "none", stroke: PALETTE.waterLight, opacity: "0.5", "stroke-width": sw.toFixed(2), "data-line-tier": "atmosphere"
+    });
+  }
+
+  return group;
+}
+
+function renderBoat(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.wood;
+  const accent = params.accent || PALETTE.cream;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "boat");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "boat", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  shadowEllipse(group, w * 0.50, h * 0.88, w * 0.48, h * 0.07);
+
+  // Hull
+  add(group, "path", {
+    d: `M${(w * 0.10).toFixed(1)} ${(h * 0.64).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.86).toFixed(1)} ${(w * 0.90).toFixed(1)} ${(h * 0.64).toFixed(1)} Q${(w * 0.78).toFixed(1)} ${(h * 0.96).toFixed(1)} ${(w * 0.26).toFixed(1)} ${(h * 0.94).toFixed(1)} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Mast
+  penLineToGroup(group, [[w * 0.50, h * 0.16], [w * 0.50, h * 0.70]],
+    { tier: "outline", baseWidth: sw * 1.5, stroke: ink, rng });
+
+  // Sail
+  add(group, "path", {
+    d: `M${(w * 0.50).toFixed(1)} ${(h * 0.18).toFixed(1)} L${(w * 0.50).toFixed(1)} ${(h * 0.60).toFixed(1)} L${(w * 0.18).toFixed(1)} ${(h * 0.54).toFixed(1)} Z`,
+    fill: accent, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+  add(group, "path", {
+    d: `M${(w * 0.50).toFixed(1)} ${(h * 0.22).toFixed(1)} L${(w * 0.80).toFixed(1)} ${(h * 0.56).toFixed(1)} L${(w * 0.50).toFixed(1)} ${(h * 0.60).toFixed(1)} Z`,
+    fill: shade(color, 15), stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  if (isFull) {
+    // Sail fabric lines
+    repeat(group, 4, i => {
+      penLineToGroup(group, [[w * (0.42 - i * 0.06), h * (0.28 + i * 0.07)], [w * (0.22 + i * 0.04), h * (0.54 + i * 0.01)]],
+        { tier: "texture", baseWidth: sw * 0.25, stroke: shade(accent, -10), rng });
+    });
+    // Hull planking
+    repeat(group, 5, i => {
+      penLineToGroup(group, [[w * (0.15 + i * 0.12), h * 0.78], [w * (0.20 + i * 0.12), h * 0.72]],
+        { tier: "texture", baseWidth: sw * 0.22, stroke: shade(color, -15), rng });
+    });
+    // Flag
+    penLineToGroup(group, [[w * 0.50, h * 0.16], [w * 0.56, h * 0.12], [w * 0.50, h * 0.18]],
+      { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.rose, rng });
+  }
+
+  return group;
+}
+
+function renderBench(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.wood;
+  const accent = params.accent || PALETTE.moss;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "bench");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "bench", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  shadowEllipse(group, w * 0.50, h * 0.92, w * 0.46, h * 0.05);
+
+  // Back slats
+  repeat(group, 3, i => {
+    add(group, "rect", {
+      x: (w * 0.12).toFixed(1), y: (h * (0.24 + i * 0.14)).toFixed(1),
+      width: (w * 0.76).toFixed(1), height: (h * 0.09).toFixed(1),
+      rx: (sw * 2).toFixed(1), fill: i % 2 ? color : shade(color, 15), stroke: ink, "stroke-width": sw.toFixed(2)
+    });
+  });
+
+  // Seat
+  add(group, "rect", {
+    x: (w * 0.10).toFixed(1), y: (h * 0.68).toFixed(1),
+    width: (w * 0.80).toFixed(1), height: (h * 0.11).toFixed(1),
+    rx: (sw * 2).toFixed(1), fill: color, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Legs
+  penLineToGroup(group, [[w * 0.20, h * 0.76], [w * 0.16, h * 0.94]],
+    { tier: "outline", baseWidth: sw * 1.6, stroke: PALETTE.deepInk, rng });
+  penLineToGroup(group, [[w * 0.80, h * 0.76], [w * 0.84, h * 0.94]],
+    { tier: "outline", baseWidth: sw * 1.6, stroke: PALETTE.deepInk, rng });
+
+  // Side supports
+  penLineToGroup(group, [[w * 0.18, h * 0.28], [w * 0.20, h * 0.72]],
+    { tier: "outline", baseWidth: sw * 1.3, stroke: ink, rng });
+  penLineToGroup(group, [[w * 0.82, h * 0.28], [w * 0.80, h * 0.72]],
+    { tier: "outline", baseWidth: sw * 1.3, stroke: ink, rng });
+
+  if (isFull) {
+    // Wood grain
+    repeat(group, 8, i => {
+      const gx = w * (0.14 + i * 0.08);
+      penLineToGroup(group, [[gx, h * 0.70], [gx + w * 0.02, h * 0.71]],
+        { tier: "texture", baseWidth: sw * 0.18, stroke: shade(color, -10), rng });
+    });
+  }
+
+  return group;
+}
+
+function renderBicycle(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.blue;
+  const accent = params.accent || PALETTE.warm;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "bicycle");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "bicycle", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  shadowEllipse(group, w * 0.50, h * 0.91, w * 0.48, h * 0.04);
+
+  // Wheels
+  const wheelR = Math.min(w, h) * 0.20;
+  add(group, "circle", { cx: (w * 0.24).toFixed(1), cy: (h * 0.69).toFixed(1), r: wheelR.toFixed(1), fill: "none", stroke: ink, "stroke-width": (sw * 1.4).toFixed(2) });
+  add(group, "circle", { cx: (w * 0.76).toFixed(1), cy: (h * 0.69).toFixed(1), r: wheelR.toFixed(1), fill: "none", stroke: ink, "stroke-width": (sw * 1.4).toFixed(2) });
+
+  // Frame
+  penLineToGroup(group, [[w * 0.24, h * 0.69], [w * 0.44, h * 0.38], [w * 0.58, h * 0.69]],
+    { tier: "outline", baseWidth: sw * 1.8, stroke: color, rng });
+  penLineToGroup(group, [[w * 0.44, h * 0.38], [w * 0.70, h * 0.38], [w * 0.76, h * 0.69]],
+    { tier: "outline", baseWidth: sw * 1.8, stroke: color, rng });
+
+  // Handlebars
+  penLineToGroup(group, [[w * 0.38, h * 0.34], [w * 0.52, h * 0.34]],
+    { tier: "outline", baseWidth: sw * 1.2, stroke: ink, rng });
+  penLineToGroup(group, [[w * 0.74, h * 0.28], [w * 0.82, h * 0.28]],
+    { tier: "outline", baseWidth: sw * 1.2, stroke: ink, rng });
+  penLineToGroup(group, [[w * 0.70, h * 0.38], [w * 0.74, h * 0.28]],
+    { tier: "outline", baseWidth: sw * 1.0, stroke: ink, rng });
+
+  // Axle
+  add(group, "circle", { cx: (w * 0.58).toFixed(1), cy: (h * 0.69).toFixed(1), r: (sw * 2).toFixed(2), fill: accent, stroke: ink, "stroke-width": sw.toFixed(2) });
+
+  if (isFull) {
+    // Spokes
+    repeat(group, 16, i => {
+      const a = i * Math.PI / 8;
+      const cx = i < 8 ? w * 0.24 : w * 0.76;
+      const cy = h * 0.69;
+      penLineToGroup(group, [[cx, cy], [cx + Math.cos(a) * wheelR * 0.92, cy + Math.sin(a) * wheelR * 0.92]],
+        { tier: "texture", baseWidth: sw * 0.18, stroke: ink, rng });
+    });
+    // Seat
+    add(group, "ellipse", { cx: (w * 0.44).toFixed(1), cy: (h * 0.34).toFixed(1), rx: (w * 0.06).toFixed(1), ry: (h * 0.03).toFixed(1), fill: PALETTE.deepInk, stroke: ink, "stroke-width": sw.toFixed(2) });
+  }
+
+  return group;
+}
+
+function renderFence(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.wood;
+  const accent = params.accent || PALETTE.moss;
+  const density = params.density || 0.5;
+  const count = Math.max(4, Math.round(5 + density * 5));
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "fence");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "fence", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  // Pickets
+  repeat(group, count, i => {
+    const x = i * w / (count - 1);
+    const pW = w * 0.05;
+    add(group, "path", {
+      d: `M${x.toFixed(1)} ${(h * 0.94).toFixed(1)} L${x.toFixed(1)} ${(h * 0.20).toFixed(1)} L${(x + pW * 0.5).toFixed(1)} ${(h * 0.10).toFixed(1)} L${(x + pW).toFixed(1)} ${(h * 0.20).toFixed(1)} L${(x + pW).toFixed(1)} ${(h * 0.94).toFixed(1)} Z`,
+      fill: i % 2 ? color : shade(color, 12), stroke: ink, "stroke-width": sw.toFixed(2)
+    });
+  });
+
+  // Horizontal rails
+  add(group, "rect", { x: "0", y: (h * 0.44).toFixed(1), width: w.toString(), height: (h * 0.10).toFixed(1), fill: accent, stroke: ink, "stroke-width": sw.toFixed(2) });
+  add(group, "rect", { x: "0", y: (h * 0.74).toFixed(1), width: w.toString(), height: (h * 0.10).toFixed(1), fill: accent, stroke: ink, "stroke-width": sw.toFixed(2) });
+
+  if (isFull) {
+    // Wood grain on pickets
+    repeat(group, count, i => {
+      const x = i * w / count;
+      penLineToGroup(group, [[x + w * 0.01, h * 0.50], [x + w * 0.02, h * 0.40]],
+        { tier: "texture", baseWidth: sw * 0.15, stroke: shade(color, -10), rng });
+    });
+  }
+
+  return group;
+}
+
+function renderBuildings(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.moss;
+  const accent = params.accent || PALETTE.night;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "buildings");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "buildings", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.6, Math.min(w, h) * 0.014);
+
+  repeat(group, 6, i => {
+    const x = i * w / 6;
+    const top = h * (0.14 + (i % 3) * 0.10);
+    const bw = w * 0.18;
+
+    // Building body
+    add(group, "rect", {
+      x: x.toFixed(1), y: top.toFixed(1),
+      width: bw.toFixed(1), height: (h - top).toFixed(1),
+      rx: sw.toFixed(1),
+      fill: i % 2 ? color : shade(color, -10),
+      stroke: ink, "stroke-width": sw.toFixed(2)
+    });
+
+    if (isFull) {
+      // Windows - left column
+      repeat(group, 3, row => {
+        add(group, "rect", {
+          x: (x + bw * 0.22).toFixed(1), y: (top + h * 0.12 + row * h * 0.18).toFixed(1),
+          width: (bw * 0.20).toFixed(1), height: (h * 0.08).toFixed(1),
+          fill: (i + row) % 3 ? PALETTE.gold : PALETTE.night,
+          opacity: "0.8", stroke: "none"
+        });
+      });
+
+      // Windows - right column
+      repeat(group, 3, row => {
+        add(group, "rect", {
+          x: (x + bw * 0.58).toFixed(1), y: (top + h * 0.12 + row * h * 0.18).toFixed(1),
+          width: (bw * 0.20).toFixed(1), height: (h * 0.08).toFixed(1),
+          fill: (i + row) % 2 ? PALETTE.gold : PALETTE.night,
+          opacity: "0.7", stroke: "none"
+        });
+      });
+
+      // Roof line detail
+      penLineToGroup(group, [[x + bw * 0.1, top], [x + bw * 0.5, top - h * 0.04], [x + bw * 0.9, top]],
+        { tier: "structure", baseWidth: sw * 0.7, stroke: ink, rng });
+    }
+  });
+
+  return group;
+}
+
+function renderRain(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.blue;
+  const density = params.density || 0.5;
+  const count = Math.max(5, Math.round(8 + density * 22));
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "rain");
+  const group = node("g", { "data-template": "rain", "data-art-style": "storybook-layered" });
+  const sw = Math.max(1.2, Math.min(w, h) * 0.012);
+
+  // Rain streaks
+  repeat(group, count, i => {
+    const x = (i * 47) % w;
+    const y = (i * 71) % h;
+    const length = h * (0.04 + (i % 4) * 0.01);
+
+    penLineToGroup(group, [[x, y], [x - w * 0.015, y + length]], {
+      tier: i % 3 === 0 ? "structure" : "texture",
+      baseWidth: sw * (0.55 + (i % 3) * 0.22),
+      stroke: i % 3 ? color : shade(color, 15),
+      opacity: 0.48 + (i % 4) * 0.12,
+      rng: createRNG(entity.id, `rain-${i}`)
+    });
+  });
+
+  if (isFull) {
+    // Splash ripples on ground
+    repeat(group, Math.max(2, Math.round(count / 7)), i => {
+      const sx = (i * 173 + w * 0.12) % w;
+      const sy = h * (0.84 + (i % 3) * 0.04);
+      add(group, "path", {
+        d: `M${sx.toFixed(1)} ${sy.toFixed(1)} q${(w * 0.025).toFixed(1)} ${(-h * 0.025).toFixed(1)} ${(w * 0.05).toFixed(1)} 0`,
+        fill: "none", stroke: shade(color, 15), opacity: "0.65", "stroke-width": sw.toFixed(2),
+        "stroke-linecap": "round", "data-line-tier": "atmosphere"
+      });
+      // Puddle hint
+      penLineToGroup(group, [[sx + w * 0.03, sy], [sx + w * 0.03, sy - h * 0.03]], {
+        tier: "atmosphere", baseWidth: sw * 0.4, stroke: color, opacity: 0.4, rng: createRNG(entity.id, `splash-${i}`)
+      });
+    });
+  }
+
+  return group;
+}
+
+function renderCloud(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.blue;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "cloud");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "cloud", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  // Underside shadow
+  add(group, "ellipse", {
+    cx: (w * 0.50).toFixed(1), cy: (h * 0.78).toFixed(1),
+    rx: (w * 0.44).toFixed(1), ry: (h * 0.14).toFixed(1),
+    fill: shade(color, -30), opacity: "0.22", stroke: "none"
+  });
+
+  // Cloud puffs
+  repeat(group, 5, i => {
+    add(group, "circle", {
+      cx: (w * (0.18 + i * 0.17)).toFixed(1),
+      cy: (h * (0.62 - (i % 3) * 0.10)).toFixed(1),
+      r: (h * (0.22 + (i % 2) * 0.04)).toFixed(1),
+      fill: i % 2 ? color : shade(color, 10),
+      stroke: ink, "stroke-width": sw.toFixed(2)
+    });
+  });
+
+  // Base connecting line
+  penLineToGroup(group, [[w * 0.12, h * 0.70], [w * 0.35, h * 0.66], [w * 0.55, h * 0.72], [w * 0.75, h * 0.68], [w * 0.90, h * 0.70]], {
+    tier: "structure", baseWidth: sw * 0.7, stroke: shade(color, -20), rng
+  });
+
+  if (isFull) {
+    // Fluff detail
+    repeat(group, 8, i => {
+      penLineToGroup(group, [
+        [w * (0.15 + i * 0.09), h * (0.48 + (i % 2) * 0.08)],
+        [w * (0.18 + i * 0.09), h * (0.42 + (i % 2) * 0.06)]
+      ], { tier: "texture", baseWidth: sw * 0.25, stroke: shade(color, 5), rng });
+    });
+  }
+
+  return group;
+}
+
+function renderSun(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.gold;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "sun");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "sun", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+  const r = Math.min(w, h) * 0.34;
+
+  // Outer glow
+  add(group, "circle", {
+    cx: (w * 0.50).toFixed(1), cy: (h * 0.50).toFixed(1),
+    r: (Math.min(w, h) * 0.49).toFixed(1),
+    fill: color, opacity: "0.14", stroke: "none"
+  });
+
+  // Sun body
+  add(group, "circle", {
+    cx: (w * 0.50).toFixed(1), cy: (h * 0.50).toFixed(1),
+    r: r.toFixed(1),
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Rays
+  repeat(group, 10, i => {
+    const a = i * Math.PI / 5;
+    const outerR = r * 1.32;
+    const innerR = r * 1.05;
+    penLineToGroup(group, [
+      [w * 0.50 + Math.cos(a) * innerR, h * 0.50 + Math.sin(a) * innerR],
+      [w * 0.50 + Math.cos(a) * outerR, h * 0.50 + Math.sin(a) * outerR]
+    ], {
+      tier: "structure", baseWidth: sw * 1.2, stroke: shade(color, -10), rng: createRNG(entity.id, `ray-${i}`)
+    });
+  });
+
+  return group;
+}
+
+function renderMoon(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.gold;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "moon");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "moon", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+  const r = Math.min(w, h) * 0.34;
+
+  // Outer glow
+  add(group, "circle", {
+    cx: (w * 0.50).toFixed(1), cy: (h * 0.50).toFixed(1),
+    r: (Math.min(w, h) * 0.49).toFixed(1),
+    fill: color, opacity: "0.16", stroke: "none"
+  });
+
+  // Moon body
+  add(group, "circle", {
+    cx: (w * 0.50).toFixed(1), cy: (h * 0.50).toFixed(1),
+    r: r.toFixed(1),
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Crescent shadow
+  add(group, "circle", {
+    cx: (w * 0.66).toFixed(1), cy: (h * 0.38).toFixed(1),
+    r: (r * 0.95).toFixed(1),
+    fill: PALETTE.paper, stroke: "none"
+  });
+
+  if (isFull) {
+    // Surface craters
+    add(group, "circle", { cx: (w * 0.38).toFixed(1), cy: (h * 0.44).toFixed(1), r: (r * 0.14).toFixed(1), fill: shade(color, -15), opacity: "0.25", stroke: "none" });
+    add(group, "circle", { cx: (w * 0.40).toFixed(1), cy: (h * 0.58).toFixed(1), r: (r * 0.08).toFixed(1), fill: shade(color, -15), opacity: "0.20", stroke: "none" });
+  }
+
+  return group;
+}
+
+function renderStars(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.gold;
+  const count = Math.max(3, Math.min(30, params.count || Math.round(6 + (params.density || 0.5) * 18)));
+  const rng = createRNG(entity.id, "stars");
+  const group = node("g", { "data-template": "stars", "data-art-style": "storybook-layered" });
+  const sw = Math.max(1.2, Math.min(w, h) * 0.012);
+
+  repeat(group, count, i => {
+    const x = (i * 73) % w;
+    const y = (i * 41) % h;
+    const r = 2 + (i % 3);
+    const opacity = 0.55 + (i % 3) * 0.20;
+
+    // Four-pointed star
+    add(group, "path", {
+      d: `M${(x - r * 2.2).toFixed(1)} ${y.toFixed(1)} L${(x + r * 2.2).toFixed(1)} ${y.toFixed(1)} M${x.toFixed(1)} ${(y - r * 2.2).toFixed(1)} L${x.toFixed(1)} ${(y + r * 2.2).toFixed(1)}`,
+      fill: "none", stroke: color, "stroke-width": (r * 0.65).toFixed(2),
+      opacity: opacity.toFixed(2), "stroke-linecap": "round",
+      "data-line-tier": "atmosphere"
+    });
+  });
+
+  return group;
+}
+
+function renderTree(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.foliage;
+  const accent = params.accent || PALETTE.warm;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "tree");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "tree", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  shadowEllipse(group, w * 0.50, h * 0.98, w * 0.40, h * 0.035);
+
+  // Trunk
+  add(group, "path", {
+    d: `M${(w * 0.44).toFixed(1)} ${(h * 0.97).toFixed(1)} Q${(w * 0.47).toFixed(1)} ${(h * 0.65).toFixed(1)} ${(w * 0.40).toFixed(1)} ${(h * 0.44).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.52).toFixed(1)} ${(w * 0.60).toFixed(1)} ${(h * 0.44).toFixed(1)} Q${(w * 0.53).toFixed(1)} ${(h * 0.65).toFixed(1)} ${(w * 0.56).toFixed(1)} ${(h * 0.97).toFixed(1)} Z`,
+    fill: accent, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Foliage clusters
+  repeat(group, 7, i => {
+    const cx = w * (0.22 + (i % 4) * 0.18);
+    const cy = h * (0.20 + Math.floor(i / 4) * 0.20 + (i % 2) * 0.04);
+    const cr = h * (0.18 + (i % 3) * 0.02);
+    add(group, "circle", {
+      cx: cx.toFixed(1), cy: cy.toFixed(1), r: cr.toFixed(1),
+      fill: i % 3 ? color : shade(color, 10),
+      stroke: ink, "stroke-width": sw.toFixed(2)
+    });
+  });
+
+  if (isFull) {
+    // Trunk bark texture
+    repeat(group, 6, i => {
+      const ty = h * (0.48 + i * 0.07);
+      penLineToGroup(group, [[w * 0.41, ty], [w * 0.45, ty]],
+        { tier: "texture", baseWidth: sw * 0.22, stroke: shade(accent, -15), rng });
+      penLineToGroup(group, [[w * 0.55, ty], [w * 0.59, ty]],
+        { tier: "texture", baseWidth: sw * 0.22, stroke: shade(accent, -15), rng });
+    });
+
+    // Branch detail
+    penLineToGroup(group, [[w * 0.40, h * 0.44], [w * 0.24, h * 0.32]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: ink, rng });
+    penLineToGroup(group, [[w * 0.60, h * 0.44], [w * 0.74, h * 0.36]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: ink, rng });
+
+    // Fruit/flowers
+    repeat(group, 5, i => {
+      add(group, "circle", {
+        cx: (w * (0.26 + (i % 3) * 0.22)).toFixed(1),
+        cy: (h * (0.18 + (i % 2) * 0.22)).toFixed(1),
+        r: (h * 0.022).toFixed(1),
+        fill: i % 2 ? accent : PALETTE.gold,
+        stroke: "none"
+      });
+    });
+  }
+
+  return group;
+}
+
+function renderMountain(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.moss;
+  const accent = params.accent || PALETTE.stoneDark;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "mountain");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "mountain", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  // Background peak (lighter)
+  add(group, "path", {
+    d: `M0 ${h} L${(w * 0.24).toFixed(1)} ${(h * 0.36).toFixed(1)} L${(w * 0.44).toFixed(1)} ${h} Z`,
+    fill: shade(color, 15), stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Main peak
+  add(group, "path", {
+    d: `M${(w * 0.18).toFixed(1)} ${h} L${(w * 0.50).toFixed(1)} ${(h * 0.10).toFixed(1)} L${(w * 0.72).toFixed(1)} ${(h * 0.60).toFixed(1)} L${(w * 0.84).toFixed(1)} ${(h * 0.30).toFixed(1)} L${w} ${h} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  if (isFull) {
+    // Snow cap
+    add(group, "path", {
+      d: `M${(w * 0.40).toFixed(1)} ${(h * 0.40).toFixed(1)} L${(w * 0.50).toFixed(1)} ${(h * 0.10).toFixed(1)} L${(w * 0.62).toFixed(1)} ${(h * 0.36).toFixed(1)} L${(w * 0.56).toFixed(1)} ${(h * 0.32).toFixed(1)} L${(w * 0.48).toFixed(1)} ${(h * 0.40).toFixed(1)} Z`,
+      fill: PALETTE.paper, stroke: ink, "stroke-width": (sw * 0.6).toFixed(2)
+    });
+
+    // Shadow side
+    add(group, "path", {
+      d: `M${(w * 0.50).toFixed(1)} ${(h * 0.10).toFixed(1)} L${(w * 0.62).toFixed(1)} ${(h * 0.36).toFixed(1)} L${(w * 0.72).toFixed(1)} ${(h * 0.60).toFixed(1)} L${(w * 0.56).toFixed(1)} ${(h * 0.32).toFixed(1)} Z`,
+      fill: shade(color, -15), opacity: "0.40", stroke: "none"
+    });
+
+    // Ridge lines
+    repeat(group, 4, i => {
+      const rx = w * (0.30 + i * 0.12);
+      penLineToGroup(group, [[rx, h * (0.50 + i * 0.08)], [rx + w * 0.06, h * (0.38 + i * 0.05)]],
+        { tier: "texture", baseWidth: sw * 0.25, stroke: shade(color, -10), rng });
+    });
+  }
+
+  return group;
+}
+
+function renderFlowers(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.rose;
+  const accent = params.accent || PALETTE.warm;
+  const count = Math.max(3, Math.min(24, params.count || 10));
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "flowers");
+  const group = node("g", { "data-template": "flowers", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.5, Math.min(w, h) * 0.014);
+
+  repeat(group, count, i => {
+    const x = (i * 67) % w;
+    const baseY = h * 0.92;
+    const topY = h * 0.38 + (i % 4) * h * 0.14;
+    const stemRng = createRNG(entity.id, `flower-stem-${i}`);
+
+    // Stem
+    penLineToGroup(group, [[x, baseY], [x - w * 0.02, (baseY + topY) / 2], [x, topY]], {
+      tier: "structure", baseWidth: sw * 0.8, stroke: PALETTE.moss, rng: stemRng
+    });
+
+    // Petals
+    repeat(group, 5, petal => {
+      const a = petal * Math.PI * 2 / 5;
+      const petalRng = createRNG(entity.id, `flower-petal-${i}-${petal}`);
+      const pr = h * 0.045;
+      add(group, "circle", {
+        cx: (x + Math.cos(a) * pr * 1.1).toFixed(1),
+        cy: (topY + Math.sin(a) * pr * 1.1).toFixed(1),
+        r: pr.toFixed(1),
+        fill: i % 2 ? accent : color,
+        stroke: ink, "stroke-width": (sw * 0.45).toFixed(2)
+      });
+    });
+
+    // Center
+    add(group, "circle", {
+      cx: x.toFixed(1), cy: topY.toFixed(1),
+      r: Math.max(2, h * 0.028).toFixed(1),
+      fill: PALETTE.gold, stroke: "none"
+    });
+
+    if (isFull && i % 3 === 0) {
+      // Leaf
+      penLineToGroup(group, [[x, (baseY + topY) / 2], [x + w * 0.03, (baseY + topY) / 2 - h * 0.02]],
+        { tier: "texture", baseWidth: sw * 0.35, stroke: PALETTE.foliage, rng: stemRng });
+    }
+  });
+
+  return group;
+}
+
+function renderRiverOrStreet(entity, quality, namespace) {
+  const { width: w, height: h, params = {}, templateId } = entity;
+  const color = params.color || (templateId === "river" ? PALETTE.waterDark : PALETTE.stone);
+  const accent = params.accent || PALETTE.warm;
+  const isStreet = templateId === "street";
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, templateId);
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": templateId, "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  // Body path
+  add(group, "path", {
+    d: `M0 ${(h * 0.24).toFixed(1)} Q${(w * 0.35).toFixed(1)} ${(h * 0.75).toFixed(1)} ${(w * 0.55).toFixed(1)} ${(h * 0.36).toFixed(1)} T${w} ${(h * 0.52).toFixed(1)} L${w} ${h} Q${(w * 0.65).toFixed(1)} ${(h * 0.68).toFixed(1)} ${(w * 0.45).toFixed(1)} ${(h * 0.94).toFixed(1)} T0 ${(h * 0.72).toFixed(1)} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Flow/road markings
+  repeat(group, 4, i => {
+    penLineToGroup(group, [
+      [w * (0.10 + i * 0.20), h * (0.50 + (i % 2) * 0.15)],
+      [w * (0.18 + i * 0.20), h * (0.50 + (i % 2) * 0.15) + h * 0.04]
+    ], {
+      tier: isStreet ? "structure" : "texture",
+      baseWidth: sw * (isStreet ? 1.0 : 0.7),
+      stroke: isStreet ? accent : shade(color, 15),
+      opacity: 0.70,
+      rng
+    });
+  });
+
+  if (isFull) {
+    if (isStreet) {
+      // Center line
+      repeat(group, 8, i => {
+        penLineToGroup(group, [
+          [w * (0.05 + i * 0.11), h * (0.48 + (i % 3) * 0.06)],
+          [w * (0.10 + i * 0.11), h * (0.48 + (i % 3) * 0.06)]
+        ], { tier: "structure", baseWidth: sw * 0.5, stroke: PALETTE.gold, opacity: 0.6, rng });
+      });
+    } else {
+      // Water ripples
+      repeat(group, 6, i => {
+        const rx = w * (0.10 + i * 0.14);
+        const ry = h * (0.45 + (i % 3) * 0.12);
+        penLineToGroup(group, [[rx, ry], [rx + w * 0.06, ry - h * 0.02]],
+          { tier: "atmosphere", baseWidth: sw * 0.35, stroke: PALETTE.waterLight, opacity: 0.55, rng: createRNG(entity.id, `ripple-${i}`) });
+      });
+    }
+  }
+
+  return group;
+}
+
+function renderGrass(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.foliage;
+  const accent = params.accent || PALETTE.moss;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "grass");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "grass", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.5, Math.min(w, h) * 0.014);
+
+  // Ground body
+  add(group, "path", {
+    d: `M0 ${(h * 0.44).toFixed(1)} Q${(w * 0.24).toFixed(1)} ${(h * 0.28).toFixed(1)} ${(w * 0.46).toFixed(1)} ${(h * 0.42).toFixed(1)} T${w} ${(h * 0.36).toFixed(1)} L${w} ${h} L0 ${h} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  // Grass blades
+  repeat(group, 22, i => {
+    const x = i * w / 21;
+    const top = h * (0.22 + (i % 5) * 0.03);
+    const bladeRng = createRNG(entity.id, `grass-${i}`);
+
+    penLineToGroup(group, [[x, h * 0.69], [x - w * 0.012, h * 0.44], [x - w * 0.022, top]], {
+      tier: "structure", baseWidth: sw * 0.55, stroke: i % 3 ? shade(color, -10) : accent, rng: bladeRng
+    });
+    penLineToGroup(group, [[x, h * 0.69], [x + w * 0.015, h * 0.45], [x + w * 0.028, top + h * 0.03]], {
+      tier: "structure", baseWidth: sw * 0.55, stroke: i % 3 ? shade(color, -5) : shade(accent, -5), rng: bladeRng
+    });
+  });
+
+  if (isFull) {
+    // Flower dots in grass
+    repeat(group, 4, i => {
+      add(group, "circle", {
+        cx: (w * (0.15 + i * 0.22)).toFixed(1),
+        cy: (h * (0.38 + (i % 2) * 0.06)).toFixed(1),
+        r: (sw * 1.0).toFixed(2),
+        fill: PALETTE.gold, opacity: "0.7", stroke: "none"
+      });
+    });
+  }
+
+  return group;
+}
+
+function renderPuddle(entity, quality, namespace) {
+  const { width: w, height: h, params = {} } = entity;
+  const color = params.color || PALETTE.waterLight;
+  const accent = params.accent || PALETTE.waterDark;
+  const isFull = quality === "full";
+  const rng = createRNG(entity.id, "puddle");
+  const ns = namespace || "canvas";
+  const group = node("g", { "data-template": "puddle", "data-art-style": "storybook-layered" });
+  const ink = PALETTE.ink;
+  const sw = Math.max(1.8, Math.min(w, h) * 0.016);
+
+  // Floor shadow
+  add(group, "ellipse", {
+    cx: (w * 0.50).toFixed(1), cy: (h * 0.64).toFixed(1),
+    rx: (w * 0.50).toFixed(1), ry: (h * 0.32).toFixed(1),
+    fill: PALETTE.night, opacity: "0.12", stroke: "none"
+  });
+
+  // Water body (irregular)
+  add(group, "path", {
+    d: `M${(w * 0.08).toFixed(1)} ${(h * 0.56).toFixed(1)} Q${(w * 0.20).toFixed(1)} ${(h * 0.28).toFixed(1)} ${(w * 0.42).toFixed(1)} ${(h * 0.38).toFixed(1)} Q${(w * 0.60).toFixed(1)} ${(h * 0.20).toFixed(1)} ${(w * 0.78).toFixed(1)} ${(h * 0.42).toFixed(1)} Q${(w * 0.98).toFixed(1)} ${(h * 0.44).toFixed(1)} ${(w * 0.94).toFixed(1)} ${(h * 0.70).toFixed(1)} Q${(w * 0.72).toFixed(1)} ${(h * 0.96).toFixed(1)} ${(w * 0.50).toFixed(1)} ${(h * 0.80).toFixed(1)} Q${(w * 0.22).toFixed(1)} ${(h * 0.96).toFixed(1)} ${(w * 0.08).toFixed(1)} ${(h * 0.56).toFixed(1)} Z`,
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+
+  if (isFull) {
+    // Water surface reflections
+    repeat(group, 5, i => {
+      const rx = w * (0.18 + i * 0.14);
+      const ry = h * (0.44 + (i % 3) * 0.08);
+      penLineToGroup(group, [[rx, ry], [rx + w * 0.05, ry - h * 0.01]], {
+        tier: "atmosphere", baseWidth: sw * 0.35, stroke: shade(color, 10), opacity: 0.75, rng: createRNG(entity.id, `reflect-${i}`)
+      });
+    });
+
+    // Highlight
+    add(group, "path", {
+      d: `M${(w * 0.48).toFixed(1)} ${(h * 0.68).toFixed(1)} Q${(w * 0.64).toFixed(1)} ${(h * 0.60).toFixed(1)} ${(w * 0.76).toFixed(1)} ${(h * 0.66).toFixed(1)}`,
+      fill: "none", stroke: PALETTE.cream, opacity: "0.5", "stroke-width": sw.toFixed(2),
+      "stroke-linecap": "round", "data-line-tier": "atmosphere"
+    });
+  }
+
+  return group;
+}
+
+// ==================== RENDER DISPATCH ====================
+
+const RENDERERS = {
+  person: renderPerson,
+  cat: renderCat,
+  dog: renderDog,
+  bird: renderBird,
+  umbrella: renderUmbrella,
+  streetlamp: renderStreetlamp,
+  roof: renderRoof,
+  house: renderHouse,
+  bridge: renderBridge,
+  boat: renderBoat,
+  bench: renderBench,
+  bicycle: renderBicycle,
+  fence: renderFence,
+  buildings: renderBuildings,
+  rain: renderRain,
+  cloud: renderCloud,
+  sun: renderSun,
+  moon: renderMoon,
+  stars: renderStars,
+  tree: renderTree,
+  mountain: renderMountain,
+  flowers: renderFlowers,
+  river: renderRiverOrStreet,
+  grass: renderGrass,
+  street: renderRiverOrStreet,
+  puddle: renderPuddle
+};
+
+/**
+ * Render a semantic entity using the storybook style.
+ *
+ * @param {object} entity - Entity object with templateId, width, height, params, id, etc.
+ * @param {object} [options] - Rendering options.
+ * @param {string} [options.quality="full"] - "base" or "full"
+ * @param {string} [options.namespace="canvas"] - Namespace for SVG id uniqueness
+ * @returns {SVGElement} SVG group element
+ */
+export function renderEntity(entity, options = {}) {
+  const quality = options.quality || "full";
+  const namespace = options.namespace || "canvas";
+  const renderFn = RENDERERS[entity.templateId];
+  if (!renderFn) throw new Error(`未知实体模板: ${entity.templateId}`);
+
+  let group;
+  try {
+    group = renderFn(entity, quality, namespace);
+  } catch (err) {
+    throw new Error(`渲染实体 ${entity.templateId} 失败: ${err.message}`);
+  }
+
+  // Ensure gradient defs are present (prepend to group)
+  if (quality === "full") {
+    const defs = node("defs");
+    const { width: w, height: h, params = {} } = entity;
+    const color = params.color || PALETTE.green;
+    const ns = namespace || "canvas";
+
+    // Primary gradient
+    const g1 = node("linearGradient", {
+      id: namespaceId(ns, `grad-${entity.id}`),
+      x1: "0", y1: "0", x2: "1", y2: "1",
+      gradientTransform: "rotate(25)"
+    });
+    const stop1a = node("stop", { offset: "0%", "stop-color": shade(color, 20), "stop-opacity": "1" });
+    const stop1b = node("stop", { offset: "45%", "stop-color": color, "stop-opacity": "1" });
+    const stop1c = node("stop", { offset: "100%", "stop-color": shade(color, -25), "stop-opacity": "1" });
+    g1.appendChild(stop1a);
+    g1.appendChild(stop1b);
+    g1.appendChild(stop1c);
+    defs.appendChild(g1);
+
+    // Shadow gradient
+    const g2 = node("linearGradient", {
+      id: namespaceId(ns, `shadow-${entity.id}`),
+      x1: "0", y1: "0", x2: "1", y2: "1"
+    });
+    g2.appendChild(node("stop", { offset: "0%", "stop-color": PALETTE.night, "stop-opacity": "0.25" }));
+    g2.appendChild(node("stop", { offset: "100%", "stop-color": PALETTE.night, "stop-opacity": "0.05" }));
+    defs.appendChild(g2);
+
+    // Highlight gradient (radial)
+    const g3 = node("radialGradient", {
+      id: namespaceId(ns, `highlight-${entity.id}`),
+      cx: "40%", cy: "30%", r: "60%"
+    });
+    g3.appendChild(node("stop", { offset: "0%", "stop-color": PALETTE.cream, "stop-opacity": "0.4" }));
+    g3.appendChild(node("stop", { offset: "100%", "stop-color": PALETTE.cream, "stop-opacity": "0" }));
+    defs.appendChild(g3);
+
+    group.children.unshift(defs);
+  }
+
+  // Set common attributes
   group.setAttribute("data-id", entity.id);
   group.setAttribute("data-name", entity.name);
-  const direction = entity.params?.direction === "left" ? ` translate(${entity.width} 0) scale(-1 1)` : "";
-  group.setAttribute("transform", `translate(${entity.x} ${entity.y}) rotate(${entity.rotation} ${entity.width/2} ${entity.height/2})${direction}`);
-  group.setAttribute("opacity", entity.opacity);
+  group.setAttribute("data-quality", quality);
+  group.setAttribute("data-namespace", namespace);
+  group.setAttribute("data-template", entity.templateId);
+
+  const direction = entity.params?.direction === "left"
+    ? ` translate(${entity.width} 0) scale(-1 1)` : "";
+  const rotation = entity.rotation || 0;
+  group.setAttribute("transform",
+    `translate(${entity.x} ${entity.y}) rotate(${rotation} ${entity.width / 2} ${entity.height / 2})${direction}`);
+
+  if (entity.opacity !== undefined && entity.opacity !== 1) {
+    group.setAttribute("opacity", String(entity.opacity));
+  }
+
   return group;
 }
 
