@@ -27,6 +27,11 @@ let speechStartedAt = null;
 let lastSoundAt = null;
 let transcribing = false;
 let segmentSequence = 0;
+let recoveryInProgress = false;
+let recoveryAttempted = false;
+let recoveryCount = 0;
+let sessionStartedAt = null;
+let releasingCloudResources = false;
 
 const MIN_SPEECH_MS = 250;
 const MAX_SEGMENT_MS = 10000;
@@ -56,7 +61,12 @@ function cloudErrorMessage(errorCode, fallback) {
     empty_transcription: "云端未识别到文字",
     api_unreachable: "未连接到听画 API 服务，请使用 python main.py 启动",
     microphone_permission: "麦克风权限被拒绝，请在浏览器设置中允许访问",
-    browser_unsupported: "当前浏览器不支持云端录音"
+    browser_unsupported: "当前浏览器不支持云端录音",
+    microphone_track_ended: "麦克风连接已中断",
+    audio_context_suspended: "浏览器音频上下文已挂起",
+    recorder_error: "浏览器录音器异常停止",
+    recorder_stopped: "浏览器录音器意外停止",
+    capture_recovery_failed: "语音会话中断，自动恢复失败"
   };
   return messages[errorCode] || fallback || "云端语音识别失败";
 }
@@ -180,6 +190,7 @@ export function render() {
     $("ignored-list").innerHTML = engine.state.scene.ignored.length
       ? engine.state.scene.ignored.map(item => `<li>${escapeHtml(item)}</li>`).join("") : "<li>无忽略内容</li>";
   }
+  updateCanvasControls();
   lastRenderDuration = performance.now() - started;
 }
 
@@ -351,7 +362,9 @@ export async function handleCommand(rawText, confidence = 1, metrics = {}) {
   return executeActions(actions, started, metrics.confirmationMessage || "", { ...metrics, transcript: rawText });
 }
 
-function executeActions(actions, started, confirmationMessage = "", metrics = {}) {
+function executeActions(actions, started, confirmationMessage = "", metrics = {}, options = {}) {
+  const announce = options.announce !== false;
+  const reportAcceptance = options.reportAcceptance !== false;
   try {
     console.log("[executeActions] 执行 %d 个动作", actions.length);
     const result = engine.execute(actions); render();
@@ -359,36 +372,95 @@ function executeActions(actions, started, confirmationMessage = "", metrics = {}
     console.log("[executeActions] 执行成功, 画布图形数:", engine.state.objects.length, "效果:", result.effects.length);
     for (const effect of result.effects) {
       if (effect.type === "export") download(effect.format);
-      if (effect.type === "help") say("你可以创建图形，选择和移动，修改颜色，对齐，撤销，清空或保存画布");
-      if (effect.type === "status") say(describeState());
+      if (effect.type === "help" && announce) say("你可以创建图形，选择和移动，修改颜色，对齐，撤销，清空或保存画布");
+      if (effect.type === "status" && announce) say(describeState());
     }
     const latency = Math.round(performance.now() - started);
     $("latency").textContent = `本次响应 ${latency}ms`;
-    emitAcceptance("command-completed", {
-      segmentId: metrics.segmentId,
-      transcript: metrics.transcript,
-      success: true,
-      actionCount: actions.length,
-      localDurationMs: latency,
-      endToEndDurationMs: metrics.segmentSubmittedAt == null ? null : Math.round(performance.now() - metrics.segmentSubmittedAt)
-    });
-    if (!result.effects.length) say(confirmationMessage || `已执行，共${actions.length}个动作`);
+    if (reportAcceptance) {
+      emitAcceptance("command-completed", {
+        segmentId: metrics.segmentId,
+        transcript: metrics.transcript,
+        success: true,
+        actionCount: actions.length,
+        localDurationMs: latency,
+        endToEndDurationMs: metrics.segmentSubmittedAt == null ? null : Math.round(performance.now() - metrics.segmentSubmittedAt)
+      });
+    }
+    if (!result.effects.length && announce) say(confirmationMessage || `已执行，共${actions.length}个动作`);
+    if (!announce && options.visualMessage) {
+      $("feedback").textContent = options.visualMessage;
+      toast(options.visualMessage);
+    }
     return true;
   } catch (error) {
     console.log("[executeActions] 执行失败:", error.message);
-    emitAcceptance("command-completed", {
-      segmentId: metrics.segmentId,
-      transcript: metrics.transcript,
-      success: false,
-      actionCount: actions.length,
-      localDurationMs: Math.round(performance.now() - started),
-      endToEndDurationMs: metrics.segmentSubmittedAt == null ? null : Math.round(performance.now() - metrics.segmentSubmittedAt),
-      errorCode: "command_execution_failed",
-      message: error.message
-    });
-    say(error.message);
+    if (reportAcceptance) {
+      emitAcceptance("command-completed", {
+        segmentId: metrics.segmentId,
+        transcript: metrics.transcript,
+        success: false,
+        actionCount: actions.length,
+        localDurationMs: Math.round(performance.now() - started),
+        endToEndDurationMs: metrics.segmentSubmittedAt == null ? null : Math.round(performance.now() - metrics.segmentSubmittedAt),
+        errorCode: "command_execution_failed",
+        message: error.message
+      });
+    }
+    if (announce) say(error.message);
+    else {
+      $("feedback").textContent = error.message;
+      toast(error.message);
+    }
     return false;
   }
+}
+
+function updateCanvasControls() {
+  if ($("undo-button")) $("undo-button").disabled = engine.undoStack.length === 0;
+  if ($("redo-button")) $("redo-button").disabled = engine.redoStack.length === 0;
+  if ($("clear-button")) $("clear-button").disabled = engine.state.objects.length === 0;
+}
+
+function closeExportMenu() {
+  if (!$("export-options") || !$("export-button")) return;
+  $("export-options").hidden = true;
+  $("export-button").setAttribute("aria-expanded", "false");
+}
+
+export function executeToolbarAction(actions, visualMessage) {
+  return executeActions(actions, performance.now(), "", {}, {
+    announce: false,
+    reportAcceptance: false,
+    visualMessage
+  });
+}
+
+function setupCanvasControls() {
+  if (!$("undo-button")) return;
+  $("undo-button").onclick = () => executeToolbarAction([{ type: "history", operation: "undo" }], "已撤销");
+  $("redo-button").onclick = () => executeToolbarAction([{ type: "history", operation: "redo" }], "已重做");
+  $("clear-button").onclick = () => executeToolbarAction([{ type: "canvas", operation: "clear" }], "画布已清空，可撤销");
+  $("export-button").onclick = event => {
+    event?.stopPropagation?.();
+    const open = $("export-options").hidden;
+    $("export-options").hidden = !open;
+    $("export-button").setAttribute("aria-expanded", String(open));
+  };
+  $("export-options").querySelectorAll?.("[data-export-format]").forEach(button => {
+    button.onclick = () => {
+      const format = button.dataset.exportFormat || button.getAttribute("data-export-format");
+      executeToolbarAction([{ type: "export", format }], `已导出 ${format === "project" ? "工程文件" : format.toUpperCase()}`);
+      closeExportMenu();
+    };
+  });
+  document.addEventListener?.("click", event => {
+    if (!event.target?.closest?.(".export-menu")) closeExportMenu();
+  });
+  document.addEventListener?.("keydown", event => {
+    if (event.key === "Escape") closeExportMenu();
+  });
+  updateCanvasControls();
 }
 
 export function voiceActivityDecision(state, level, now) {
@@ -478,6 +550,14 @@ async function ensureCloudResources() {
     nextAnalyser.fftSize = 2048;
     context.createMediaStreamSource(stream).connect(nextAnalyser);
     if (context.state === "suspended") await context.resume?.();
+    stream.getTracks?.().forEach(track => {
+      track.addEventListener?.("ended", () => handleVoiceInterruption("microphone_track_ended"));
+    });
+    context.addEventListener?.("statechange", () => {
+      if (context.state === "suspended" && document.visibilityState !== "hidden") {
+        handleVoiceInterruption("audio_context_suspended");
+      }
+    });
     mediaStream = stream;
     audioContext = context;
     analyser = nextAnalyser;
@@ -495,23 +575,31 @@ function beginCloudSegment() {
   segmentStartedAt = performance.now();
   speechStartedAt = null;
   lastSoundAt = null;
-  mediaRecorder = new MediaRecorder(mediaStream);
-  mediaRecorder.ondataavailable = event => { if (event.data?.size) audioChunks.push(event.data); };
-  mediaRecorder.onstop = async () => {
+  const recorder = new MediaRecorder(mediaStream);
+  recorder._listenPaintExpectedStop = false;
+  mediaRecorder = recorder;
+  recorder.ondataavailable = event => { if (event.data?.size) audioChunks.push(event.data); };
+  recorder.onerror = () => handleVoiceInterruption("recorder_error");
+  recorder.onstop = async () => {
+    const expectedStop = recorder._listenPaintExpectedStop;
     const disposition = segmentDisposition;
-    const type = mediaRecorder?.mimeType || audioChunks[0]?.type || "audio/webm";
+    const type = recorder.mimeType || audioChunks[0]?.type || "audio/webm";
     const blob = new Blob(audioChunks, { type });
-    mediaRecorder = null;
+    if (mediaRecorder === recorder) mediaRecorder = null;
     audioChunks = [];
+    if (!expectedStop) {
+      await handleVoiceInterruption("recorder_stopped");
+      return;
+    }
     if (disposition === "submit" && blob.size) {
       const segmentId = ++segmentSequence;
       const segmentSubmittedAt = performance.now();
       emitAcceptance("segment-submitted", { segmentId });
       await transcribeAudio(blob, { segmentId, segmentSubmittedAt });
     }
-    if (listeningWanted && !speaking && !fallbackPending && !transcribing) startCloudListening();
+    if (listeningWanted && !speaking && !fallbackPending && !transcribing && !recoveryInProgress) startCloudListening();
   };
-  mediaRecorder.start(250);
+  recorder.start(250);
 }
 
 function monitorCloudAudio() {
@@ -529,6 +617,7 @@ function monitorCloudAudio() {
 function finishCloudSegment(disposition = "discard") {
   if (!mediaRecorder || mediaRecorder.state !== "recording") return;
   segmentDisposition = disposition;
+  mediaRecorder._listenPaintExpectedStop = true;
   mediaRecorder.stop();
 }
 
@@ -540,12 +629,17 @@ function stopCloudCapture() {
 }
 
 function releaseCloudResources() {
-  stopCloudCapture();
-  mediaStream?.getTracks?.().forEach(track => track.stop());
-  audioContext?.close?.();
-  mediaStream = null;
-  audioContext = null;
-  analyser = null;
+  releasingCloudResources = true;
+  try {
+    stopCloudCapture();
+    mediaStream?.getTracks?.().forEach(track => track.stop());
+    audioContext?.close?.();
+    mediaStream = null;
+    audioContext = null;
+    analyser = null;
+  } finally {
+    releasingCloudResources = false;
+  }
 }
 
 async function startCloudListening() {
@@ -568,8 +662,59 @@ async function startCloudListening() {
     $("wave").classList.add("active");
     beginCloudSegment();
     if (!audioMonitorTimer) audioMonitorTimer = setInterval(monitorCloudAudio, 100);
+    return true;
   } catch (error) {
     showFallbackPrompt(error.message || "云端语音识别启动失败", error.errorCode || "capture_start_failed");
+    return false;
+  }
+}
+
+function sessionDurationMs() {
+  return sessionStartedAt == null ? null : Math.max(0, Math.round(performance.now() - sessionStartedAt));
+}
+
+function beginVoiceSession() {
+  if (sessionStartedAt != null) return;
+  sessionStartedAt = performance.now();
+  recoveryAttempted = false;
+  recoveryCount = 0;
+  emitAcceptance("session-started", { sessionStartedAt: new Date().toISOString() });
+}
+
+function endVoiceSession(reason) {
+  if (sessionStartedAt == null) return;
+  emitAcceptance("session-ended", { reason, sessionDurationMs: sessionDurationMs(), recoveryCount });
+  sessionStartedAt = null;
+}
+
+async function handleVoiceInterruption(reason) {
+  if (releasingCloudResources || !listeningWanted || speaking || fallbackPending || transcribing || recoveryInProgress) return false;
+  emitAcceptance("session-interrupted", { reason, sessionDurationMs: sessionDurationMs(), recoveryCount });
+  if (recoveryAttempted) {
+    showFallbackPrompt(cloudErrorMessage("capture_recovery_failed"), "capture_recovery_failed", true);
+    return false;
+  }
+  recoveryAttempted = true;
+  recoveryInProgress = true;
+  recoveryCount++;
+  emitAcceptance("recovery-attempted", { reason, recoveryCount });
+  updateListeningUi("语音连接中断，正在自动恢复");
+  releaseCloudResources();
+  const recovered = await startCloudListening();
+  emitAcceptance("recovery-completed", { reason, recoveryCount, success: recovered === true });
+  recoveryInProgress = false;
+  return recovered === true;
+}
+
+function checkVoiceHealth() {
+  if (!listeningWanted || speaking || fallbackPending || transcribing || recoveryInProgress) return;
+  const tracks = mediaStream?.getTracks?.() || [];
+  if (tracks.some(track => track.readyState === "ended")) {
+    handleVoiceInterruption("microphone_track_ended");
+  } else if (audioContext?.state === "suspended") {
+    handleVoiceInterruption("audio_context_suspended");
+  } else if (!mediaRecorder || mediaRecorder.state !== "recording") {
+    handleVoiceInterruption("recorder_stopped");
   }
 }
 
@@ -633,10 +778,11 @@ export async function transcribeAudio(blob, metrics = {}) {
 }
 
 function showFallbackPrompt(reason, errorCode = "cloud_unavailable", retryable = true, segmentId = null) {
-  emitAcceptance("error", { segmentId, errorCode, retryable, message: reason });
   fallbackPending = true;
   releaseCloudResources();
   listeningWanted = false;
+  endVoiceSession(errorCode);
+  emitAcceptance("error", { segmentId, errorCode, retryable, message: reason });
   updateListeningUi("云端识别不可用，请重试或停止");
   $("fallback-panel").hidden = false;
   say(`${reason}。请选择重试云端识别或停止聆听`);
@@ -650,6 +796,7 @@ export async function retryCloudRecognition() {
   updateListeningUi("正在检查云端配置");
   await loadVoiceCapabilities();
   listeningWanted = true;
+  beginVoiceSession();
   updateListeningUi("正在启动");
   await startCloudListening();
 }
@@ -658,6 +805,7 @@ function stopListening() {
   listeningWanted = false;
   fallbackPending = false;
   releaseCloudResources();
+  endVoiceSession("user_stopped");
   $("fallback-panel").hidden = true;
   clearPreview();
   updateListeningUi("已暂停");
@@ -669,6 +817,7 @@ async function startFullListening() {
     await loadVoiceCapabilities();
   }
   listeningWanted = true;
+  beginVoiceSession();
   fallbackPending = false;
   $("fallback-panel").hidden = true;
   clearPreview();
@@ -687,6 +836,9 @@ function setupVoice() {
   };
   $("retry-cloud").onclick = retryCloudRecognition;
   $("fallback-stop").onclick = stopListening;
+  document.addEventListener?.("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkVoiceHealth();
+  });
   loadVoiceCapabilities();
 }
 
@@ -695,6 +847,7 @@ export { tryPreviewRender };
 export function _resetCloudConfig() { cloudConfigured = null; backendApiAvailable = null; }
 export function testEnterFullListening() {
   listeningWanted = true;
+  beginVoiceSession();
   fallbackPending = false;
   $("fallback-panel").hidden = true;
   startCloudListening();
@@ -730,7 +883,7 @@ function restoreAutosave() {
   }
 }
 
-restoreAutosave(); render(); setupVoice();
+restoreAutosave(); render(); setupCanvasControls(); setupVoice();
 if (new URLSearchParams(globalThis.location?.search || "").get("acceptance") === "1") {
   import("./acceptance.js").then(({ setupAcceptancePanel }) => setupAcceptancePanel());
 }

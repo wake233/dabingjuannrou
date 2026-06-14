@@ -51,7 +51,20 @@
             <h2>未命名作品</h2>
           </div>
         </div>
-        <span class="canvas-size">1000 × 700</span>
+        <div class="canvas-actions" aria-label="画布快捷操作">
+          <button id="undo-button" class="canvas-action" type="button">撤销</button>
+          <button id="redo-button" class="canvas-action" type="button">重做</button>
+          <button id="clear-button" class="canvas-action danger" type="button">清空</button>
+          <div class="export-menu">
+            <button id="export-button" class="canvas-action" type="button" aria-haspopup="menu" aria-expanded="false">导出</button>
+            <div id="export-options" class="export-options" role="menu" hidden>
+              <button type="button" role="menuitem" data-export-format="svg">导出 SVG</button>
+              <button type="button" role="menuitem" data-export-format="png">导出 PNG</button>
+              <button type="button" role="menuitem" data-export-format="project">导出工程文件</button>
+            </div>
+          </div>
+          <span class="canvas-size">1000 × 700</span>
+        </div>
       </div>
       <div class="canvas-shell" id="canvas-shell">
         <svg id="canvas" viewBox="0 0 1000 700" role="img" aria-label="语音绘图画布">

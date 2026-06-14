@@ -24,9 +24,18 @@ export const ACCEPTANCE_COMMANDS = [
 
 export function createAcceptanceState() {
   return {
-    version: 2,
+    version: 3,
     updatedAt: null,
     environment: { browser: "", os: "", microphone: "", network: "", stt: "", operator: "" },
+    session: {
+      startedAt: null,
+      durationMs: null,
+      interruptionCount: 0,
+      recoveryAttempts: 0,
+      recoverySuccesses: 0,
+      lastInterruptionReason: "",
+      endedReason: ""
+    },
     records: ACCEPTANCE_COMMANDS.map((command, index) => ({
       index: index + 1,
       command,
@@ -47,10 +56,13 @@ export function loadAcceptanceState(storage = globalThis.localStorage) {
   if (!stored) return createAcceptanceState();
   try {
     const parsed = JSON.parse(stored);
-    if (parsed?.version !== 2 || !Array.isArray(parsed.records) || parsed.records.length !== ACCEPTANCE_COMMANDS.length) {
+    if (!Array.isArray(parsed?.records) || parsed.records.length !== ACCEPTANCE_COMMANDS.length) {
       return createAcceptanceState();
     }
-    return parsed;
+    if (parsed.version === 2) {
+      return { ...parsed, version: 3, session: createAcceptanceState().session };
+    }
+    return parsed.version === 3 && parsed.session ? parsed : createAcceptanceState();
   } catch (_error) {
     return createAcceptanceState();
   }
@@ -76,7 +88,33 @@ function recordForEvent(state, event) {
 }
 
 export function applyAcceptanceEvent(state, event) {
-  if (!event || !["segment-submitted", "transcription-completed", "command-completed", "error"].includes(event.type)) return state;
+  if (!event) return state;
+  if (event.type === "session-started") {
+    state.session.startedAt = event.sessionStartedAt || event.timestamp || null;
+    state.session.durationMs = null;
+    state.session.endedReason = "";
+    return state;
+  }
+  if (event.type === "session-interrupted") {
+    state.session.interruptionCount++;
+    state.session.durationMs = event.sessionDurationMs ?? state.session.durationMs;
+    state.session.lastInterruptionReason = event.reason || "";
+    return state;
+  }
+  if (event.type === "recovery-attempted") {
+    state.session.recoveryAttempts++;
+    return state;
+  }
+  if (event.type === "recovery-completed") {
+    if (event.success === true) state.session.recoverySuccesses++;
+    return state;
+  }
+  if (event.type === "session-ended") {
+    state.session.durationMs = event.sessionDurationMs ?? state.session.durationMs;
+    state.session.endedReason = event.reason || "";
+    return state;
+  }
+  if (!["segment-submitted", "transcription-completed", "command-completed", "error"].includes(event.type)) return state;
   const record = recordForEvent(state, event);
   if (!record) return state;
   if (event.segmentId != null) record.segmentId = event.segmentId;
@@ -123,6 +161,10 @@ ${env}
 
 - 通过：${summary.passed}/${summary.total}
 - 已判定：${summary.decided}/${summary.total}
+- 会话时长：${state.session.durationMs ?? "待测"}ms
+- 中断：${state.session.interruptionCount} 次
+- 自动恢复：${state.session.recoverySuccesses}/${state.session.recoveryAttempts}
+- 最近中断原因：${state.session.lastInterruptionReason || "无"}
 
 ## 指令记录
 
@@ -149,6 +191,8 @@ function escapeHtml(value) {
 function renderPanel(panel, state, storage) {
   const summary = acceptanceSummary(state);
   panel.querySelector("[data-summary]").textContent = `通过 ${summary.passed}/${summary.total}，已判定 ${summary.decided}/${summary.total}`;
+  panel.querySelector("[data-session-summary]").textContent =
+    `会话 ${state.session.durationMs ?? "-"}ms · 中断 ${state.session.interruptionCount} 次 · 自动恢复 ${state.session.recoverySuccesses}/${state.session.recoveryAttempts}`;
   panel.querySelector("[data-records]").innerHTML = state.records.map(record => {
     const result = record.override ?? record.success;
     return `<li data-index="${record.index}">
@@ -176,6 +220,7 @@ export function setupAcceptancePanel({ storage = globalThis.localStorage } = {})
   panel.innerHTML = `
     <div class="acceptance-heading"><div><p class="panel-kicker">真实语音验收</p><h2>云端模式 20 条指令</h2></div><strong data-summary></strong></div>
     <p>数据只保存在当前浏览器，不保存音频。按顺序说出下列指令，可人工修正结果。</p>
+    <p data-session-summary></p>
     <div class="acceptance-environment">
       ${Object.keys(state.environment).map(key => `<label>${key}<input data-environment="${key}" value="${escapeHtml(state.environment[key])}"></label>`).join("")}
     </div>

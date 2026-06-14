@@ -25,6 +25,8 @@ class FakeElement {
     this.innerHTML = "";
     this.disabled = false;
     this.onclick = null;
+    this.dataset = {};
+    this.hidden = false;
   }
   setAttribute(name, value) { this.attributes[name] = String(value); }
   getAttribute(name) { return this.attributes[name] ?? null; }
@@ -62,7 +64,8 @@ function installBrowser() {
     "drawing-layer", "preview-layer", "canvas", "canvas-shell", "object-count", "selection-count", "object-list",
     "feedback", "toast", "transcript", "latency", "voice-status", "listen-button",
     "wave", "listen-label", "fallback-panel", "retry-cloud", "fallback-stop",
-    "mode-indicator", "scene-summary", "scene-composition", "entity-list", "ignored-list"
+    "mode-indicator", "scene-summary", "scene-composition", "entity-list", "ignored-list",
+    "undo-button", "redo-button", "clear-button", "export-button", "export-options"
   ];
   const elements = Object.fromEntries(ids.map(id => [id, new FakeElement(id === "canvas" ? "svg" : "div", id)]));
   elements.canvas.replaceChildren(elements["preview-layer"], elements["drawing-layer"]);
@@ -72,6 +75,7 @@ function installBrowser() {
   const recognitions = [];
   let objectUrl = 0;
   const storage = new Map();
+  const documentListeners = new Map();
   globalThis.localStorage = {
     getItem: key => storage.get(key) ?? null,
     setItem: (key, value) => storage.set(key, String(value)),
@@ -80,7 +84,9 @@ function installBrowser() {
   };
 
   globalThis.document = {
+    visibilityState: "visible",
     getElementById: id => elements[id],
+    addEventListener: (type, listener) => documentListeners.set(type, listener),
     createElementNS: (_ns, tagName) => new FakeElement(tagName),
     createElement: tagName => {
       const element = new FakeElement(tagName);
@@ -159,7 +165,7 @@ function installBrowser() {
   globalThis.Image = class {
     set src(value) { this.value = value; queueMicrotask(() => this.onload?.()); }
   };
-  return { elements, downloads, canvasCalls, recognitions };
+  return { elements, downloads, canvasCalls, recognitions, documentListeners };
 }
 
 const browser = installBrowser();
@@ -613,12 +619,141 @@ test("云端模式启动采集，并在语音反馈期间暂停后恢复", async
   assert.equal(tracks[0].stopped, true);
 });
 
+test("语音轨道意外中断只自动恢复一次并记录恢复指标", async () => {
+  const events = [];
+  const streams = [];
+  const recorders = [];
+  const contexts = [];
+  const OriginalCustomEvent = globalThis.CustomEvent;
+  const originalDispatch = globalThis.dispatchEvent;
+  globalThis.CustomEvent = class { constructor(_name, options) { this.detail = options.detail; } };
+  globalThis.dispatchEvent = event => events.push(event.detail);
+
+  class FakeTrack {
+    constructor() { this.readyState = "live"; this.listeners = {}; }
+    addEventListener(type, listener) { this.listeners[type] = listener; }
+    stop() {
+      this.readyState = "ended";
+      this.listeners.ended?.();
+    }
+    endUnexpectedly() {
+      this.readyState = "ended";
+      this.listeners.ended?.();
+    }
+  }
+  class FakeMediaRecorder {
+    constructor() { this.state = "inactive"; this.mimeType = "audio/webm"; recorders.push(this); }
+    start() { this.state = "recording"; }
+    stop() { this.state = "inactive"; this.onstop?.(); }
+  }
+  class FakeAudioContext {
+    constructor() { this.state = "running"; this.listeners = {}; contexts.push(this); }
+    createAnalyser() { return { fftSize: 2048, getByteTimeDomainData(values) { values.fill(128); } }; }
+    createMediaStreamSource() { return { connect() {} }; }
+    addEventListener(type, listener) { this.listeners[type] = listener; }
+    close() { this.state = "closed"; }
+  }
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { mediaDevices: { getUserMedia: async () => {
+      const track = new FakeTrack();
+      const stream = { track, getTracks: () => [track] };
+      streams.push(stream);
+      return stream;
+    } } }
+  });
+  globalThis.MediaRecorder = FakeMediaRecorder;
+  window.MediaRecorder = FakeMediaRecorder;
+  window.AudioContext = FakeAudioContext;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ apiVersion: 1, cloudTranscriptionConfigured: true, cloudTranscriptionIssue: null, commandModelConfigured: true })
+  });
+
+  await app.retryCloudRecognition();
+  streams[0].track.endUnexpectedly();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(streams.length, 2);
+  assert.equal(recorders.at(-1).state, "recording");
+  assert.ok(events.some(event => event.type === "session-interrupted" && event.reason === "microphone_track_ended"));
+  assert.ok(events.some(event => event.type === "recovery-completed" && event.success === true));
+
+  recorders.at(-1).onerror();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(streams.length, 2);
+  assert.equal(browser.elements["voice-status"].textContent, "云端识别不可用，请重试或停止");
+  assert.ok(events.some(event => event.errorCode === "capture_recovery_failed"));
+  browser.elements["fallback-stop"].click();
+
+  await app.retryCloudRecognition();
+  recorders.at(-1).state = "inactive";
+  browser.documentListeners.get("visibilitychange")();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(streams.length, 4);
+  browser.elements["listen-button"].click();
+  assert.equal(streams.length, 4, "用户主动停止不会触发恢复");
+
+  await app.retryCloudRecognition();
+  contexts.at(-1).state = "suspended";
+  contexts.at(-1).listeners.statechange();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(streams.length, 6);
+  browser.elements["listen-button"].click();
+
+  globalThis.dispatchEvent = originalDispatch;
+  globalThis.CustomEvent = OriginalCustomEvent;
+});
+
 test("清空画布直接执行", async () => {
   resetApp();
   await app.handleCommand("画一个矩形");
   assert.equal(app.engine.state.objects.length, 1);
   await app.handleCommand("清空画布");
   assert.equal(app.engine.state.objects.length, 0);
+});
+
+test("画布快捷按钮复用历史与清空动作且不触发语音或验收事件", () => {
+  resetApp();
+  const events = [];
+  let spoken = 0;
+  const originalDispatch = globalThis.dispatchEvent;
+  const originalSpeak = globalThis.speechSynthesis.speak;
+  const OriginalCustomEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class { constructor(_name, options) { this.detail = options.detail; } };
+  globalThis.dispatchEvent = event => events.push(event.detail);
+  globalThis.speechSynthesis.speak = () => { spoken++; };
+
+  app.executeToolbarAction([{ type: "create", kind: "rect" }], "已创建");
+  assert.equal(browser.elements["undo-button"].disabled, false);
+  assert.equal(browser.elements["redo-button"].disabled, true);
+  assert.equal(browser.elements["clear-button"].disabled, false);
+
+  browser.elements["clear-button"].click();
+  assert.equal(app.engine.state.objects.length, 0);
+  assert.equal(browser.elements["clear-button"].disabled, true);
+  browser.elements["undo-button"].click();
+  assert.equal(app.engine.state.objects.length, 1);
+  assert.equal(browser.elements["redo-button"].disabled, false);
+  browser.elements["redo-button"].click();
+  assert.equal(app.engine.state.objects.length, 0);
+  assert.equal(spoken, 0);
+  assert.deepEqual(events, []);
+
+  globalThis.dispatchEvent = originalDispatch;
+  globalThis.speechSynthesis.speak = originalSpeak;
+  globalThis.CustomEvent = OriginalCustomEvent;
+});
+
+test("导出菜单支持按钮切换与 Escape 关闭", () => {
+  const menu = browser.elements["export-options"];
+  const button = browser.elements["export-button"];
+  menu.hidden = true;
+  button.click();
+  assert.equal(menu.hidden, false);
+  assert.equal(button.getAttribute("aria-expanded"), "true");
+  browser.documentListeners.get("keydown")({ key: "Escape" });
+  assert.equal(menu.hidden, true);
+  assert.equal(button.getAttribute("aria-expanded"), "false");
 });
 
 test("删除指令直接执行", async () => {

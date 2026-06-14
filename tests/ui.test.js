@@ -14,13 +14,24 @@ test("现代画室界面保留核心语音与画布接口", () => {
     "listen-button", "voice-status", "latency", "fallback-panel",
     "canvas-shell", "canvas", "drawing-layer", "preview-layer",
     "transcript", "feedback", "object-count", "selection-count", "object-list"
-    ,"scene-summary", "scene-composition", "entity-list", "ignored-list"
+    ,"scene-summary", "scene-composition", "entity-list", "ignored-list",
+    "undo-button", "redo-button", "clear-button", "export-button", "export-options"
   ]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /class="studio-layout"/);
   assert.match(html, /class="workspace"/);
   assert.match(html, /1000 × 700/);
+});
+
+test("画布快捷工具栏提供历史、清空与三种导出入口", () => {
+  assert.match(html, /data-export-format="svg"/);
+  assert.match(html, /data-export-format="png"/);
+  assert.match(html, /data-export-format="project"/);
+  assert.match(app, /executeToolbarAction/);
+  assert.match(app, /event\.key === "Escape"/);
+  assert.match(styles, /\.canvas-actions/);
+  assert.match(styles, /\.export-options/);
 });
 
 test("主界面提供绘本场景说明、实体和忽略内容区域", () => {
