@@ -15,6 +15,18 @@ const PALETTE = Object.freeze({
   foliageDark: "#3d5432", stone: "#9e9e8e", stoneDark: "#6e6e60"
 });
 
+const DEFAULT_COLORS = Object.freeze({
+  person: PALETTE.deepBlue, cat: PALETTE.warm, dog: PALETTE.warm,
+  bird: PALETTE.blue, umbrella: PALETTE.rose, streetlamp: PALETTE.night,
+  roof: PALETTE.brick, house: PALETTE.warm, bridge: PALETTE.stone,
+  boat: PALETTE.wood, bench: PALETTE.wood, bicycle: PALETTE.blue,
+  fence: PALETTE.wood, buildings: PALETTE.moss, rain: PALETTE.blue,
+  cloud: PALETTE.blue, sun: PALETTE.gold, moon: PALETTE.gold,
+  stars: PALETTE.gold, tree: PALETTE.foliage, mountain: PALETTE.moss,
+  flowers: PALETTE.rose, river: PALETTE.waterDark, grass: PALETTE.foliage,
+  street: PALETTE.stone, puddle: PALETTE.waterLight
+});
+
 function node(tag, attrs = {}) {
   const element = document.createElementNS(NS, tag);
   Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
@@ -45,8 +57,8 @@ function alpha(hex, a) {
 // ---------- Rendering functions ----------
 
 function renderDefs(group, entity, namespace) {
-  const { width: w, height: h, params = {} } = entity;
-  const color = params.color || PALETTE.green;
+  const { width: w, height: h, params = {}, templateId } = entity;
+  const color = params.color || DEFAULT_COLORS[templateId] || PALETTE.green;
   const accent = params.accent || PALETTE.warm;
   const ns = namespace || "canvas";
 
@@ -94,19 +106,17 @@ function penLine(group, points, options = {}) {
 function penLineToGroup(group, points, options = {}) {
   const d = penPath(points, options);
   if (!d) return;
+  const tier = LINE_TIERS[options.tier] || LINE_TIERS.structure;
+  const penColor = options.stroke || PALETTE.ink;
   const el = node("path", {
     d,
-    fill: "none",
-    stroke: options.stroke || PALETTE.ink,
-    "stroke-width": ((options.baseWidth || 2.5) * (LINE_TIERS[options.tier] || LINE_TIERS.structure).width).toFixed(2),
-    opacity: (options.opacity || (LINE_TIERS[options.tier] || LINE_TIERS.structure).opacity).toFixed(2),
+    fill: penColor,
+    stroke: "none",
+    opacity: (options.opacity || tier.opacity).toFixed(2),
     "stroke-linecap": "round",
     "stroke-linejoin": "round",
     "data-line-tier": (options.tier || "structure")
   });
-  if (LINE_TIERS[options.tier] && LINE_TIERS[options.tier].dash !== "none") {
-    el.setAttribute("stroke-dasharray", LINE_TIERS[options.tier].dash);
-  }
   group.appendChild(el);
   return el;
 }
@@ -1525,8 +1535,8 @@ export function renderEntity(entity, options = {}) {
   // Ensure gradient defs are present (prepend to group)
   if (quality === "full") {
     const defs = node("defs");
-    const { width: w, height: h, params = {} } = entity;
-    const color = params.color || PALETTE.green;
+    const { width: w, height: h, params = {}, templateId } = entity;
+    const color = params.color || DEFAULT_COLORS[templateId] || PALETTE.green;
     const ns = namespace || "canvas";
 
     // Primary gradient
@@ -1561,7 +1571,7 @@ export function renderEntity(entity, options = {}) {
     g3.appendChild(node("stop", { offset: "100%", "stop-color": PALETTE.cream, "stop-opacity": "0" }));
     defs.appendChild(g3);
 
-    group.children.unshift(defs);
+    group.insertBefore(defs, group.firstChild);
   }
 
   // Set common attributes

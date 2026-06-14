@@ -154,42 +154,39 @@ export function penPath(points, options = {}) {
   let nodeCount = 0;
   const maxNodes = MAX_NODES_PER_ENTITY;
 
-  function appendPoint(x, y, cmd) {
+  function appendPoint(x, y, forceMove) {
     if (nodeCount >= maxNodes) return;
     nodeCount += 1;
-    d += `${cmd || (d ? "L" : "M")}${clamp(x).toFixed(2)} ${clamp(y).toFixed(2)}`;
+    const cmd = forceMove ? "M" : (d ? "L" : "M");
+    d += `${cmd}${clamp(x).toFixed(2)} ${clamp(y).toFixed(2)}`;
   }
 
-  // Start from beginning
-  let inGap = false;
-  let gapPath = "";
-
   // Build left side
+  let inGap = false;
+
   for (let i = 0; i < left.length; i += 1) {
     if (nodeCount >= maxNodes) break;
     const isGap = gapChance > 0 && rng() < gapChance;
     if (isGap && !closed) {
-      if (!inGap) inGap = true;
+      inGap = true;
     } else {
-      if (inGap) {
-        inGap = false;
-      }
-      appendPoint(left[i][0], left[i][1]);
+      const wasInGap = inGap;
+      inGap = false;
+      appendPoint(left[i][0], left[i][1], wasInGap);
     }
   }
 
-  // Build right side (reverse)
+  // Build right side (reverse) — connect last left point to first right point
   inGap = false;
   for (let i = right.length - 1; i >= 0; i -= 1) {
     if (nodeCount >= maxNodes) break;
     const isGap = gapChance > 0 && rng() < gapChance;
     if (isGap && !closed) {
-      if (!inGap) inGap = true;
+      inGap = true;
     } else {
-      if (inGap) {
-        inGap = false;
-      }
-      appendPoint(right[i][0], right[i][1]);
+      const wasInGap = inGap;
+      inGap = false;
+      appendPoint(right[i][0], right[i][1], wasInGap);
     }
   }
 
@@ -232,13 +229,12 @@ export function taperedStroke(points, options = {}) {
 export function createPenElement(doc, d, options = {}) {
   const element = doc.createElementNS(NS, "path");
   const tier = LINE_TIERS[options.tier] || LINE_TIERS.structure;
+  const penColor = options.stroke || "#303946";
   element.setAttribute("d", d);
-  element.setAttribute("fill", options.fill || "none");
-  element.setAttribute("stroke", options.stroke || "#303946");
+  // Default to fill (variable-width envelope), override with options.fill if provided
+  element.setAttribute("fill", options.fill !== undefined ? options.fill : penColor);
+  element.setAttribute("stroke", options.strokeOverride || "none");
   element.setAttribute("opacity", (options.opacity || tier.opacity).toFixed(2));
-  if (tier.dash !== "none") {
-    element.setAttribute("stroke-dasharray", tier.dash);
-  }
   element.setAttribute("stroke-linecap", "round");
   element.setAttribute("stroke-linejoin", "round");
   element.setAttribute("data-line-tier", tier.label);

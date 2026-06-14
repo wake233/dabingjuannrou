@@ -160,7 +160,8 @@ test("createPenElement 生成正确的 SVG 元素属性", () => {
   assert.equal(el.getAttribute("d"), d);
   assert.equal(el.getAttribute("data-line-tier"), "outline");
   assert.equal(el.getAttribute("data-part"), "head");
-  assert.equal(el.getAttribute("stroke"), "#303946");
+  assert.equal(el.getAttribute("fill"), "#303946");
+  assert.equal(el.getAttribute("stroke"), "none");
 });
 
 // Test: generateHatchLines
@@ -204,6 +205,13 @@ test("20 个实体基础渲染综合耗时低于 100ms", async () => {
     setAttribute(n, v) { this.attributes[n] = String(v); }
     getAttribute(n) { return this.attributes[n] ?? null; }
     appendChild(c) { this.children.push(c); return c; }
+    insertBefore(newChild, refChild) {
+      const idx = refChild ? this.children.indexOf(refChild) : 0;
+      if (idx >= 0) this.children.splice(idx, 0, newChild);
+      else this.children.push(newChild);
+      return newChild;
+    }
+    get firstChild() { return this.children[0] || null; }
   }
 
   const savedDoc = globalThis.document;

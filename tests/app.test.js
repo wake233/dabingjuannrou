@@ -33,6 +33,13 @@ class FakeElement {
   removeAttribute(name) { delete this.attributes[name]; }
   replaceChildren(...children) { this.children = children; }
   appendChild(child) { this.children.push(child); return child; }
+  insertBefore(newChild, refChild) {
+    const idx = refChild ? this.children.indexOf(refChild) : 0;
+    if (idx >= 0) this.children.splice(idx, 0, newChild);
+    else this.children.push(newChild);
+    return newChild;
+  }
+  get firstChild() { return this.children[0] || null; }
   cloneNode(deep = false) {
     const clone = new FakeElement(this.tagName, this.id);
     clone.attributes = { ...this.attributes };

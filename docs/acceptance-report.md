@@ -84,9 +84,31 @@
 | 实现后 `node tests/portfolio_acceptance.mjs` | 通过 | 12 题材结构评估完成 |
 | 实现后 `git diff --check` | 通过 | 仅 LF/CRLF 警告（Windows 正常） |
 
+## 审查修复记录
+
+### 第 2 轮修复（针对人工审查反馈）
+
+审查发现以下问题并已修复：
+
+| 严重度 | 问题 | 修复 |
+|--------|------|------|
+| P0 | `templates.js:1564` `group.children.unshift(defs)` — 真实 DOM 的 `children` 是 `HTMLCollection`，无 `unshift` 方法 | 改为 `group.insertBefore(defs, group.firstChild)` |
+| P1 | `templates.js:94` `penLineToGroup` 将笔触外轮廓路径设置 `fill="none"` 再用固定 `stroke-width` 描边，产生等宽双边轮廓而非实心起收笔渐细笔触 | 改为 `fill` 使用笔触颜色，`stroke="none"` — `penPath()` 生成的是封闭可变宽包络面，应填充而非描边 |
+| P1 | `pen_stroke.js:168` 断笔只跳过采样点，恢复后仍用 `L` 连接，不产生真正断口 | 修改 gap 逻辑：恢复后第一个点使用 `M` 命令产生真正断口 |
+| P1 | 验收报告错误宣称全部完成，但视觉验收尚未执行 | 更新为准确状态（见下方） |
+| P2 | `templates.js:1529` 为所有实体通用渐变使用 `PALETTE.green` 作为默认值，覆盖了河流、水洼、云等模板各自的默认颜色 | 新增 `DEFAULT_COLORS` 映射表，26 个模板各有正确默认颜色 |
+
+### 测试结果（第 2 轮修复后）
+
+| 命令 | 结果 |
+|------|------|
+| `node --test tests/*.test.js` | 180/180 通过 |
+| `python -m unittest discover -s tests -p "test_*.py" -v` | 40/40 通过 |
+| `node tests/smoke_test.mjs` | 16/16 通过 |
+
 ## 最终结论
 
-绘本造型与线条精修计划已全部实施完成。全部 26 条验收标准均有充分证据证明通过。核心改动包括：
+绘本造型与线条精修计划的代码实现已完成，自动化测试全部通过。核心改动包括：
 - 新增钢笔线条引擎 (static/pen_stroke.js)，实现确定性可变宽路径、四级线条、seeded PRNG
 - 全部 26 个语义实体使用钢笔笔触重建，每个实体具有独立轮廓和完整结构
 - 色彩光线系统（渐变、阴影、高光、命名空间隔离）
@@ -96,6 +118,6 @@
 
 ## 残余风险
 
-- 视觉验收需要真实浏览器人工审查：26 个实体轮廓可区分性、六张标杆场景的结构可信度和光影统一性需要在 Chrome/Edge 中实际查看 entity-gallery.html 和 benchmark-scenes.html 确认。
+- **视觉验收尚未完成**：26 个实体轮廓可区分性、六张标杆场景的结构可信度和光影统一性需要在真实浏览器中实际查看 entity-gallery.html 和 benchmark-scenes.html 确认。PLAN_V4.md 明确要求浏览器视觉证据后才能标记完成。
 - 性能目标（A24: full 精绘 500ms 内）仅在 requestAnimationFrame 调度层面实现，实际渲染耗时受浏览器和设备影响，需要在目标设备上真实验收。
 - 旧工程视觉外观已因新渲染器而改变（预期行为）。

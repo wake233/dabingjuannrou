@@ -7,6 +7,13 @@ class Element {
   setAttribute(name, value) { this.attributes[name] = String(value); }
   getAttribute(name) { return this.attributes[name] ?? null; }
   appendChild(child) { this.children.push(child); return child; }
+  insertBefore(newChild, refChild) {
+    const idx = refChild ? this.children.indexOf(refChild) : 0;
+    if (idx >= 0) this.children.splice(idx, 0, newChild);
+    else this.children.push(newChild);
+    return newChild;
+  }
+  get firstChild() { return this.children[0] || null; }
 }
 
 // Collect all path, circle, and ellipse data strings from an element tree
