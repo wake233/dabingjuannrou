@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import re
+import unicodedata
 import uuid
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -73,7 +74,59 @@ def parse_with_llm(text, context, timeout=12):
     return result["actions"]
 
 
+def chinese_number(value):
+    if not value:
+        return None
+    if re.fullmatch(r"\d+(?:\.\d+)?", value):
+        return float(value) if "." in value else int(value)
+    digits = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if not re.fullmatch(r"[零一二两三四五六七八九十百千]+", value):
+        return None
+    total = section = current = 0
+    last_unit = 1
+    zero_after_unit = False
+    for character in value:
+        if character in digits:
+            current = digits[character]
+            if character == "零" and last_unit > 1:
+                zero_after_unit = True
+            continue
+        unit = {"十": 10, "百": 100, "千": 1000}[character]
+        section += (current or 1) * unit
+        current = 0
+        last_unit = unit
+        zero_after_unit = False
+    if current and last_unit >= 100 and not zero_after_unit:
+        current *= last_unit // 10
+    return total + section + current or None
+
+
+def parse_deterministic_interpretation(text):
+    if not isinstance(text, str):
+        return None
+    normalized = unicodedata.normalize("NFKC", text).strip()
+    compact = re.sub(r"[。！？!?，,、；;\s]+", "", normalized)
+    match = re.fullmatch(
+        r"(?:指令[:：]?)?(?:请)?(?:把)?"
+        r"(?:(?:当前)?(?:选中|选择)的?(?:实体|图形|对象)?|(?:当前)?(?:实体|图形|对象))?"
+        r"(?P<direction>向左|往左|左移|向右|往右|右移|向上|往上|上移|向下|往下|下移)"
+        r"(?:移动)?(?P<distance>[零一二两三四五六七八九十百千\d.]+)?(?:个?像素)?",
+        compact,
+    )
+    if not match:
+        return None
+    distance = chinese_number(match.group("distance")) or 50
+    direction = match.group("direction")
+    dx = -distance if direction in {"向左", "往左", "左移"} else distance if direction in {"向右", "往右", "右移"} else 0
+    dy = -distance if direction in {"向上", "往上", "上移"} else distance if direction in {"向下", "往下", "下移"} else 0
+    result = {"kind": "actions", "actions": [{"type": "move", "target": "selected", "dx": dx, "dy": dy}]}
+    return validate_interpretation(result)
+
+
 def interpret_with_llm(text, context, timeout=12):
+    deterministic = parse_deterministic_interpretation(text)
+    if deterministic:
+        return deterministic
     base_url = CONFIG["command_model"]["base_url"].rstrip("/")
     api_key = os.environ.get("OPENAI_API_KEY", "")
     model = CONFIG["command_model"]["model"]

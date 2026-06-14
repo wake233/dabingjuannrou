@@ -17,7 +17,7 @@ from server.art import (
     validate_generated_png, validate_texture_request,
 )
 from server.client import (
-    ServiceError, parse_json_content, parse_with_llm, parse_interpretation_content,
+    ServiceError, parse_deterministic_interpretation, parse_json_content, parse_with_llm, parse_interpretation_content,
     transcribe_audio, service_status,
 )
 from server.handler import AppHandler
@@ -230,6 +230,16 @@ class ServerTests(unittest.TestCase):
         with patch.dict(os.environ, {"TEXTURE_API_KEY": "texture-key"}, clear=True), \
                 patch.object(server.client, "CONFIG", config):
             self.assertTrue(service_status()["textureModelConfigured"])
+
+    def test_direction_movement_is_deterministic_before_model_fallback(self):
+        expected = {"kind": "actions", "actions": [{"type": "move", "target": "selected", "dx": -100, "dy": 0}]}
+        for text in ["左移100", "左移，100。", "指令：左移。一百。", "请把选中的实体左移 １００ 像素"]:
+            with self.subTest(text=text):
+                self.assertEqual(parse_deterministic_interpretation(text), expected)
+        with patch.dict(os.environ, {}, clear=True), patch("server.client.urlopen") as mocked:
+            self.assertEqual(server.client.interpret_with_llm("左移，100。", {}), expected)
+            mocked.assert_not_called()
+        self.assertIsNone(parse_deterministic_interpretation("把人物改成红色"))
 
     def test_valid_model_response(self):
         response = Response({"choices": [{"message": {"content": '[{"type":"create","kind":"circle"}]'}}]})
