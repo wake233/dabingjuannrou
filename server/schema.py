@@ -5,7 +5,7 @@ import re
 ALLOWED_ACTIONS = {
     "create", "select", "update", "move", "align", "distribute", "duplicate",
     "delete", "group", "ungroup", "history", "canvas", "export", "help", "status",
-    "entity_create", "entity_update", "scene_update", "creative",
+    "entity_create", "entity_update", "scene_update", "creative", "texture",
 }
 ENTITY_TEMPLATES = {
     "person": {"color", "accent", "pose", "direction", "variant"},
@@ -48,6 +48,7 @@ ACTION_FIELDS = {
     "entity_update": {"type", "target", "changes"},
     "scene_update": {"type", "changes"},
     "creative": {"type", "operation", "theme", "style", "draftId", "draftIds", "instruction", "target", "field"},
+    "texture": {"type", "operation", "prompt", "model", "cacheKey", "mimeType", "width", "height"},
 }
 COLOR_PATTERN = re.compile(r"^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$", re.I)
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
@@ -248,7 +249,7 @@ def validate_action(action):
     elif action_type == "creative":
         require_fields(action, "operation")
         operation = action["operation"]
-        if not allowed_value(operation, {"generate_drafts", "select_draft", "mix_drafts", "refine", "lock", "unlock", "set_style"}):
+        if not allowed_value(operation, {"generate_drafts", "select_draft", "mix_drafts", "refine", "lock", "unlock", "set_style", "regenerate_texture"}):
             raise ValueError("创作操作无效")
         if "theme" in action:
             validate_string(action["theme"], False, 500)
@@ -275,6 +276,20 @@ def validate_action(action):
             require_fields(action, *required[operation])
         if operation in {"lock", "unlock"} and "field" not in action and "target" not in action:
             raise ValueError("锁定目标无效")
+    elif action_type == "texture":
+        require_fields(action, "operation")
+        operation = action["operation"]
+        if not allowed_value(operation, {"pending", "apply", "remove", "missing", "failed"}):
+            raise ValueError("纹理操作无效")
+        for field in {"prompt", "model", "cacheKey", "mimeType"} & set(action):
+            validate_string(action[field], True, 1000)
+        for field in {"width", "height"} & set(action):
+            if not isinstance(action[field], int) or isinstance(action[field], bool) or not 0 <= action[field] <= 2048:
+                raise ValueError("纹理尺寸无效")
+        if operation == "apply":
+            require_fields(action, "prompt", "model", "cacheKey", "mimeType", "width", "height")
+            if action["mimeType"] != "image/png" or not action["cacheKey"]:
+                raise ValueError("纹理元数据无效")
     elif action_type == "create":
         require_fields(action, "kind")
         if not allowed_value(action["kind"], KINDS):

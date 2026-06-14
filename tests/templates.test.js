@@ -11,6 +11,7 @@ class Element {
 
 globalThis.document = { createElementNS: (_namespace, tagName) => new Element(tagName) };
 const { renderEntity } = await import("../static/templates.js");
+const { renderArtworkEntity } = await import("../static/renderers.js");
 
 test("可信绘本模板注册表覆盖首批实体且均可整体渲染", () => {
   assert.equal(Object.keys(ENTITY_TEMPLATES).length, 26);
@@ -61,4 +62,13 @@ test("模板参数仅接受声明的受控值", () => {
     width: 120, height: 100, rotation: 0, opacity: 1, params: { direction: "left" }
   });
   assert.match(cat.getAttribute("transform"), /scale\(-1 1\)/);
+});
+
+test("绘本独立渲染器保留语义实体与参数化部件", () => {
+  const entity = { id: "entity-1", kind: "entity", templateId: "person", name: "人物", x: 10, y: 20,
+    width: 240, height: 400, rotation: 0, opacity: 1, params: { variant: "woman", pose: "walking" } };
+  const rendered = renderArtworkEntity(entity, "storybook");
+  assert.equal(rendered.getAttribute("data-renderer"), "storybook");
+  assert.equal(rendered.getAttribute("data-semantic-entity"), "person");
+  assert.ok(rendered.children.length >= 10);
 });

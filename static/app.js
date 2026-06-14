@@ -1,6 +1,7 @@
 import { DrawingEngine, validateActions } from "./model.js";
 import { parseCommand } from "./parser.js";
-import { renderEntity } from "./templates.js";
+import { renderArtworkEntity } from "./renderers.js";
+import { loadTexture, removeTexture, saveTexture } from "./texture_cache.js";
 
 export const engine = new DrawingEngine();
 const $ = id => document.getElementById(id);
@@ -32,6 +33,7 @@ let recoveryAttempted = false;
 let recoveryCount = 0;
 let sessionStartedAt = null;
 let releasingCloudResources = false;
+let activeTextureDataUrl = "";
 
 const MIN_SPEECH_MS = 250;
 const MAX_SEGMENT_MS = 10000;
@@ -84,7 +86,7 @@ export function polygonPoints(kind, o) {
 
 export function svgElement(o) {
   if (o.kind === "entity") {
-    const entity = renderEntity(o);
+    const entity = renderArtworkEntity(o, engine.state.art.artDirection.style);
     if (engine.state.selection.includes(o.id)) entity.setAttribute("filter", "url(#selection-glow)");
     return entity;
   }
@@ -113,15 +115,25 @@ export function svgElement(o) {
   return el;
 }
 
-function renderObjects(layerElement, objects, selection = []) {
+function renderObjects(layerElement, objects, selection = [], textureDataUrl = "") {
   const selectionSet = new Set(selection);
-  layerElement.replaceChildren(...objects.map(o => {
+  const rendered = objects.map(o => {
     const el = svgElement(o);
     if (selectionSet.has(o.id)) {
       el.setAttribute("filter", "url(#selection-glow)");
     }
     return el;
-  }));
+  });
+  if (textureDataUrl) {
+    const texture = document.createElementNS("http://www.w3.org/2000/svg", "image");
+    texture.setAttribute("data-art-texture", "true");
+    texture.setAttribute("href", textureDataUrl);
+    texture.setAttribute("x", "0"); texture.setAttribute("y", "0");
+    texture.setAttribute("width", "1000"); texture.setAttribute("height", "700");
+    texture.setAttribute("opacity", ".16"); texture.setAttribute("pointer-events", "none");
+    rendered.push(texture);
+  }
+  layerElement.replaceChildren(...rendered);
 }
 
 function escapeHtml(value) {
@@ -173,7 +185,7 @@ let lastRenderDuration = 0;
 export function render() {
   const started = performance.now();
   clearPreview();
-  renderObjects(layer, engine.state.objects, engine.state.selection);
+  renderObjects(layer, engine.state.objects, engine.state.selection, activeTextureDataUrl);
   $("canvas").style.background = engine.state.background;
   $("object-count").textContent = engine.state.objects.length;
   $("selection-count").textContent = engine.state.selection.length;
@@ -290,6 +302,65 @@ export async function llmFallback(text) {
   return body;
 }
 
+function applyTextureState(action) {
+  engine.execute([action]);
+  render();
+  saveAutosave();
+}
+
+export async function generateArtworkTexture() {
+  const art = engine.state.art;
+  const prompt = art.artDirection.texturePrompt || `${art.artDirection.style} texture`;
+  const textureType = art.artDirection.style === "woodcut" ? "carved" : art.artDirection.style === "ink" ? "ink-wash" : "paper";
+  applyTextureState({ type: "texture", operation: "pending", prompt });
+  try {
+    const response = await fetch("/api/generate-texture", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, style: art.artDirection.style, textureType, width: 1000, height: 700 })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "纹理生成失败");
+    if (!result || result.mimeType !== "image/png" || typeof result.imageBase64 !== "string"
+      || typeof result.cacheKey !== "string" || !result.cacheKey) throw new Error("纹理响应无效");
+    const dataUrl = `data:image/png;base64,${result.imageBase64}`;
+    await saveTexture(result.cacheKey, { dataUrl, mimeType: result.mimeType, width: result.width, height: result.height });
+    activeTextureDataUrl = dataUrl;
+    applyTextureState({ type: "texture", operation: "apply", prompt: result.prompt, model: result.model,
+      cacheKey: result.cacheKey, mimeType: result.mimeType, width: result.width, height: result.height });
+    return true;
+  } catch (_error) {
+    activeTextureDataUrl = "";
+    applyTextureState({ type: "texture", operation: "failed", prompt });
+    return false;
+  }
+}
+
+export async function restoreArtworkTexture() {
+  const metadata = engine.state.art.texture;
+  if (metadata.status !== "ready" || !metadata.cacheKey) {
+    activeTextureDataUrl = "";
+    render();
+    return false;
+  }
+  const cached = await loadTexture(metadata.cacheKey);
+  if (!cached) {
+    activeTextureDataUrl = "";
+    applyTextureState({ type: "texture", operation: "missing", prompt: metadata.prompt, model: metadata.model,
+      cacheKey: metadata.cacheKey, mimeType: metadata.mimeType, width: metadata.width, height: metadata.height });
+    return false;
+  }
+  activeTextureDataUrl = cached.dataUrl;
+  render();
+  return true;
+}
+
+export async function removeArtworkTexture() {
+  const cacheKey = engine.state.art.texture.cacheKey;
+  if (cacheKey) await removeTexture(cacheKey);
+  activeTextureDataUrl = "";
+  applyTextureState({ type: "texture", operation: "remove" });
+}
+
 function actionsFromInterpretation(result) {
   if (!result || typeof result !== "object") throw new Error("模型解释结果无效");
   if (result.kind === "actions" || result.kind === "scene_revision") {
@@ -373,6 +444,10 @@ function executeActions(actions, started, confirmationMessage = "", metrics = {}
     console.log("[executeActions] 执行 %d 个动作", actions.length);
     const result = engine.execute(actions); render();
     if (actions.some(action => !["export", "help", "status"].includes(action.type))) saveAutosave();
+    if (actions.some(action => action.type === "creative" && ["select_draft", "mix_drafts", "regenerate_texture"].includes(action.operation))) {
+      generateArtworkTexture();
+    }
+    if (actions.some(action => action.type === "texture" && action.operation === "remove")) activeTextureDataUrl = "";
     console.log("[executeActions] 执行成功, 画布图形数:", engine.state.objects.length, "效果:", result.effects.length);
     for (const effect of result.effects) {
       if (effect.type === "export") download(effect.format);
@@ -867,6 +942,7 @@ export function loadProjectData(project) {
   engine.loadProject(project);
   render();
   saveAutosave();
+  restoreArtworkTexture();
 }
 
 function saveAutosave() {
@@ -887,7 +963,7 @@ function restoreAutosave() {
   }
 }
 
-restoreAutosave(); render(); setupCanvasControls(); setupVoice();
+restoreAutosave(); render(); restoreArtworkTexture(); setupCanvasControls(); setupVoice();
 if (new URLSearchParams(globalThis.location?.search || "").get("acceptance") === "1") {
   import("./acceptance.js").then(({ setupAcceptancePanel }) => setupAcceptancePanel());
 }

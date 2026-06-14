@@ -448,4 +448,6 @@ test("艺术创作语音可生成选取混合精修锁定并切换风格", () =>
   assert.deepEqual(parseCommand("取消锁定构图"), [{ type: "creative", operation: "unlock", field: "composition" }]);
   assert.deepEqual(parseCommand("右侧留白更多"), [{ type: "creative", operation: "refine", instruction: "右侧留白更多" }]);
   assert.deepEqual(parseCommand("切换成木刻风格"), [{ type: "creative", operation: "set_style", style: "woodcut" }]);
+  assert.deepEqual(parseCommand("重新生成纹理"), [{ type: "creative", operation: "regenerate_texture" }]);
+  assert.deepEqual(parseCommand("移除纹理"), [{ type: "texture", operation: "remove" }]);
 });

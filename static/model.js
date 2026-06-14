@@ -9,7 +9,7 @@ export const CANVAS = { width: 1000, height: 700 };
 export const ALLOWED_ACTIONS = new Set([
   "create", "select", "update", "move", "align", "distribute",
   "duplicate", "delete", "group", "ungroup", "history", "canvas",
-  "export", "help", "status", "entity_create", "entity_update", "scene_update", "creative"
+  "export", "help", "status", "entity_create", "entity_update", "scene_update", "creative", "texture"
 ]);
 
 const KINDS = new Set(["rect", "circle", "ellipse", "triangle", "star", "line", "arrow", "text"]);
@@ -41,7 +41,8 @@ const ACTION_FIELDS = {
   entity_create: new Set(["type", "templateId", "name", "role", "x", "y", "width", "height", "rotation", "opacity", "layer", "params"]),
   entity_update: new Set(["type", "target", "changes"]),
   scene_update: new Set(["type", "changes"]),
-  creative: new Set(["type", "operation", "theme", "style", "draftId", "draftIds", "instruction", "target", "field"])
+  creative: new Set(["type", "operation", "theme", "style", "draftId", "draftIds", "instruction", "target", "field"]),
+  texture: new Set(["type", "operation", "prompt", "model", "cacheKey", "mimeType", "width", "height"])
 };
 
 const TYPE_NAMES = {
@@ -242,7 +243,7 @@ function validateAction(action) {
   }
   if (action.type === "creative") {
     requireFields(action, "operation");
-    const operations = new Set(["generate_drafts", "select_draft", "mix_drafts", "refine", "lock", "unlock", "set_style"]);
+    const operations = new Set(["generate_drafts", "select_draft", "mix_drafts", "refine", "lock", "unlock", "set_style", "regenerate_texture"]);
     if (!operations.has(action.operation)) throw new Error("创作操作无效");
     if ("theme" in action) validateProjectString(action.theme, false, 500);
     if ("style" in action && !ART_STYLES.includes(action.style)) throw new Error("艺术风格无效");
@@ -258,6 +259,21 @@ function validateAction(action) {
     if (action.operation === "refine") requireFields(action, "instruction");
     if (["lock", "unlock"].includes(action.operation) && !("field" in action) && !("target" in action)) throw new Error("锁定目标无效");
     if (action.operation === "set_style") requireFields(action, "style");
+    return;
+  }
+  if (action.type === "texture") {
+    requireFields(action, "operation");
+    if (!["pending", "apply", "remove", "missing", "failed"].includes(action.operation)) throw new Error("纹理操作无效");
+    for (const field of ["prompt", "model", "cacheKey", "mimeType"]) {
+      if (field in action) validateProjectString(action[field], true, 1000);
+    }
+    for (const field of ["width", "height"]) {
+      if (field in action && (!Number.isSafeInteger(action[field]) || action[field] < 0 || action[field] > 2048)) throw new Error("纹理尺寸无效");
+    }
+    if (action.operation === "apply") {
+      requireFields(action, "prompt", "model", "cacheKey", "mimeType", "width", "height");
+      if (action.mimeType !== "image/png" || !action.cacheKey) throw new Error("纹理元数据无效");
+    }
     return;
   }
   if (action.type === "create") {
@@ -528,7 +544,18 @@ function applyAction(state, action, context) {
     } else if (action.operation === "set_style") {
       art.artDirection = { ...art.artDirection, ...styleDirection(action.style), style: action.style };
       state.scene.style = action.style;
+    } else if (action.operation === "regenerate_texture") {
+      art.texture.status = "pending";
     }
+    return;
+  }
+  if (action.type === "texture") {
+    if (action.operation === "remove") state.art.texture = emptyArtState().texture;
+    else state.art.texture = {
+      ...state.art.texture,
+      status: action.operation === "apply" ? "ready" : action.operation,
+      ...copy(Object.fromEntries(Object.entries(action).filter(([key]) => !["type", "operation"].includes(key))))
+    };
     return;
   }
   if (action.type === "move") {

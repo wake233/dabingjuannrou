@@ -471,6 +471,8 @@ export function composeCommonScene(text, existingNames = []) {
 export function parseCreativeCommand(text, initialContext = {}) {
   const normalized = normalizeText(fuzzyCorrect(text));
   const style = /木刻|版画/.test(normalized) ? "woodcut" : /水墨|墨画/.test(normalized) ? "ink" : /绘本/.test(normalized) ? "storybook" : null;
+  if (/重新生成纹理|重做纹理|换纹理/.test(normalized)) return [{ type: "creative", operation: "regenerate_texture" }];
+  if (/移除纹理|删除纹理|不要纹理/.test(normalized)) return [{ type: "texture", operation: "remove" }];
   if (/生成|创建|看看|给我/.test(normalized) && /小稿|构图方案|构图草稿/.test(normalized)) {
     const theme = normalized.replace(/(?:请|给我|生成|创建|看看|三张|3张|构图|方案|小稿|草稿|绘本|木刻|版画|水墨|墨画|风格|然后|接着|并且)/g, "").trim() || initialContext.sceneTheme;
     if (!theme) throw new Error("请先说明创作题材");

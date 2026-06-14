@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from server.config import STATIC
 from server.schema import MAX_AUDIO_BYTES
 from server.client import ServiceError, transcribe_audio, parse_with_llm, interpret_with_llm
+from server.art import compose_drafts, generate_texture, refine_artwork
 
 
 class AppHandler(SimpleHTTPRequestHandler):
@@ -26,7 +27,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlsplit(self.path).path
-        if path not in {"/api/parse", "/api/interpret", "/api/transcribe"}:
+        if path not in {"/api/parse", "/api/interpret", "/api/transcribe", "/api/generate-texture", "/api/compose-drafts", "/api/refine-artwork"}:
             self.send_error(404)
             return
         try:
@@ -47,6 +48,15 @@ class AppHandler(SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(body, dict):
                 raise ValueError("请求结构无效")
+            if path == "/api/generate-texture":
+                self.send_json(200, generate_texture(body))
+                return
+            if path == "/api/compose-drafts":
+                self.send_json(200, compose_drafts(body))
+                return
+            if path == "/api/refine-artwork":
+                self.send_json(200, refine_artwork(body))
+                return
             text = body.get("text", "")
             if not isinstance(text, str) or not text.strip() or len(text) > 1000:
                 raise ValueError("指令文本无效")

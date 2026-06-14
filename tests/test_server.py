@@ -10,6 +10,7 @@ import server.config
 import server.client
 from server.config import CONFIG, load_env_file, load_config_file
 from server.schema import MAX_AUDIO_BYTES, validate_actions, validate_interpretation
+from server.art import compose_drafts, generate_texture, refine_artwork, validate_texture_request
 from server.client import (
     ServiceError, parse_json_content, parse_with_llm, parse_interpretation_content,
     transcribe_audio, service_status,
@@ -44,6 +45,43 @@ class ServerTests(unittest.TestCase):
         ]:
             with self.assertRaises(ValueError):
                 validate_actions([action])
+
+    def test_texture_request_is_constrained_and_returns_png_metadata(self):
+        request = {"prompt": "soft paper", "style": "storybook", "textureType": "paper", "width": 1000, "height": 700}
+        self.assertEqual(validate_texture_request(request), request)
+        result = generate_texture(request)
+        self.assertEqual(result["mimeType"], "image/png")
+        self.assertTrue(result["imageBase64"])
+        self.assertTrue(result["cacheKey"].startswith("texture-"))
+        for invalid in [
+            {**request, "prompt": "https://evil.test/image.png"},
+            {**request, "prompt": "<svg/>"},
+            {**request, "width": 4096},
+            {**request, "textureType": "external"},
+            {**request, "url": "https://evil.test"},
+        ]:
+            with self.assertRaises(ValueError):
+                validate_texture_request(invalid)
+
+    def test_texture_action_validation(self):
+        action = {"type": "texture", "operation": "apply", "prompt": "paper", "model": "safe",
+                  "cacheKey": "texture-one", "mimeType": "image/png", "width": 1000, "height": 700}
+        self.assertEqual(validate_actions([action]), [action])
+        with self.assertRaises(ValueError):
+            validate_actions([{**action, "mimeType": "image/svg+xml"}])
+
+    def test_compose_and_refine_artwork_services_are_structured_and_lock_aware(self):
+        drafts = compose_drafts({"theme": "雨中归人", "style": "woodcut", "context": {}})["drafts"]
+        self.assertEqual(len(drafts), 3)
+        for field in ("focus", "flow", "scale", "negativeSpace"):
+            self.assertEqual(len({draft[field] for draft in drafts}), 3)
+        refined = refine_artwork({"instruction": "更孤独，加强风感，右侧留白更多",
+                                  "locks": {"fields": ["atmosphere"], "entities": ["entity-1"]}, "context": {}})
+        self.assertNotIn("emotion", refined["intentChanges"])
+        self.assertEqual(refined["intentChanges"]["rhythm"], "强烈的方向性风感")
+        self.assertEqual(refined["compositionChanges"]["negativeSpace"], "right-open")
+        with self.assertRaises(ValueError):
+            compose_drafts({"theme": "x", "style": "oil", "context": {}})
 
     def test_shared_action_validation_vectors(self):
         vectors = json.loads((Path(__file__).parent / "action_vectors.json").read_text(encoding="utf-8"))
