@@ -72,3 +72,15 @@ test("绘本独立渲染器保留语义实体与参数化部件", () => {
   assert.equal(rendered.getAttribute("data-semantic-entity"), "person");
   assert.ok(rendered.children.length >= 10);
 });
+
+test("木刻渲染器使用高反差块面、有限色板和方向性刻线", () => {
+  const entity = { id: "entity-woodcut", kind: "entity", templateId: "person", name: "旅人", x: 20, y: 30,
+    width: 260, height: 420, rotation: 0, opacity: 1, params: { direction: "left" } };
+  const rendered = renderArtworkEntity(entity, "woodcut");
+  assert.equal(rendered.getAttribute("data-renderer"), "woodcut");
+  assert.equal(rendered.getAttribute("data-art-style"), "woodcut");
+  assert.equal(rendered.children.filter(child => child.getAttribute("data-tone-block")).length, 2);
+  assert.ok(rendered.children.filter(child => child.getAttribute("data-carved-line") === "diagonal").length >= 8);
+  assert.match(rendered.getAttribute("transform"), /scale\(-1 1\)/);
+  assert.notEqual(rendered.children.length, renderArtworkEntity(entity, "storybook").children.length);
+});

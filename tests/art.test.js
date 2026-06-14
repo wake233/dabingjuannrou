@@ -90,3 +90,14 @@ test("作品验收集包含十二个精选题材与五项评分维度", () => {
   assert.deepEqual(portfolio.criteria, ["composition", "visualHierarchy", "narrative", "styleConsistency", "finish"]);
   assert.ok(portfolio.subjects.every(subject => subject.directions.length >= 2));
 });
+
+test("切换至木刻保留语义叙事关系并应用独立艺术指导", () => {
+  const engine = new DrawingEngine();
+  createScene(engine);
+  const semanticBefore = engine.state.objects.map(({ id, name, templateId }) => ({ id, name, templateId }));
+  engine.execute([{ type: "creative", operation: "set_style", style: "woodcut" }]);
+  assert.deepEqual(engine.state.objects.map(({ id, name, templateId }) => ({ id, name, templateId })), semanticBefore);
+  assert.equal(engine.state.scene.style, "woodcut");
+  assert.equal(engine.state.art.artDirection.lineLanguage, "carved");
+  assert.equal(engine.state.art.artDirection.palette.length, 3);
+});
