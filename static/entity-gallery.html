@@ -43,6 +43,7 @@
     templateIds.forEach((templateId, index) => {
       const color = colors[index % colors.length];
       const accent = accents[index % accents.length];
+      const ns = "http://www.w3.org/2000/svg";
 
       const entityLarge = {
         id: `gallery-${templateId}`, kind: "entity", templateId,
@@ -63,7 +64,13 @@
       const largeWrap = document.createElement("div");
       largeWrap.className = "card-large";
       try {
-        largeWrap.innerHTML = new XMLSerializer().serializeToString(renderEntity(entityLarge, { quality: "full", namespace: `gallery-${templateId}` }));
+        const svgLarge = document.createElementNS(ns, "svg");
+        svgLarge.setAttribute("viewBox", `0 0 ${entityLarge.width} ${entityLarge.height}`);
+        svgLarge.setAttribute("width", "240");
+        svgLarge.setAttribute("height", "170");
+        svgLarge.setAttribute("xmlns", ns);
+        svgLarge.appendChild(renderEntity(entityLarge, { quality: "full", namespace: `gallery-${templateId}` }));
+        largeWrap.appendChild(svgLarge);
       } catch (err) {
         largeWrap.innerHTML = `<p style="color:red">渲染失败: ${err.message}</p>`;
       }
@@ -71,7 +78,13 @@
       const smallWrap = document.createElement("div");
       smallWrap.className = "card-small";
       try {
-        smallWrap.innerHTML = new XMLSerializer().serializeToString(renderEntity(entitySmall, { quality: "full", namespace: `gallery-sm-${templateId}` }));
+        const svgSmall = document.createElementNS(ns, "svg");
+        svgSmall.setAttribute("viewBox", `0 0 ${entitySmall.width} ${entitySmall.height}`);
+        svgSmall.setAttribute("width", "60");
+        svgSmall.setAttribute("height", "42");
+        svgSmall.setAttribute("xmlns", ns);
+        svgSmall.appendChild(renderEntity(entitySmall, { quality: "full", namespace: `gallery-sm-${templateId}` }));
+        smallWrap.appendChild(svgSmall);
       } catch (err) {
         smallWrap.innerHTML = `<p style="color:red;font-size:0.7rem">失败</p>`;
       }

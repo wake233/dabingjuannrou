@@ -29,11 +29,11 @@
 | A17 | SVG/PNG/作品集导出始终生成 full 质量，不含选择高亮 | 代码检查 (app.js) | exportSvgSource 先执行 full 渲染，再清除 selection-glow | 通过 | static/app.js exportSvgSource: quality: "full", noSelectionHighlight: true |
 | A18 | 旧版工程加载后数据不变，自动使用新绘本渲染器 | node --test tests/acceptance.test.js | 序列化测试通过；渲染自动使用新模板 | 通过 | tests/acceptance.test.js: 版本迁移测试通过 |
 | A19 | 木刻与水墨渲染器行为不变 | node --test tests/templates.test.js | 木刻和水墨渲染测试全部通过 | 通过 | tests/templates.test.js: 木刻和水墨测试通过 |
-| A20 | 新增 26 实体图鉴页面 | 文件存在检查 | static/entity-gallery.html 存在且包含所有 26 个实体 | 通过 | static/entity-gallery.html: 26 个卡片，每个含大小双尺寸 |
-| A21 | 新增六张标杆场景页面 | 文件存在检查 | static/benchmark-scenes.html 存在且包含 6 个预配置场景 | 通过 | static/benchmark-scenes.html: 雨中人物等 6 场景 |
+| A20 | 新增 26 实体图鉴页面 | 文件存在 + 浏览器检查 | static/entity-gallery.html 存在且所有 26 个实体可在真实浏览器中渲染（已修复 SVG 命名空间问题） | 通过（代码层面） | static/entity-gallery.html: 26 个卡片；需在浏览器中验证最终视觉效果 |
+| A21 | 新增六张标杆场景页面 | 文件存在 + 浏览器检查 | static/benchmark-scenes.html 存在且 6 场景可渲染 | 通过（代码层面） | static/benchmark-scenes.html: 6 场景 43 实体可见；需人工视觉评审 |
 | A22 | 移除自动填充完成度分数的作品集验收方式 | 代码检查 | portfolio.js 不再自动填充分数 | 通过 | static/portfolio.js: requiresVisualReview 字段 |
-| A23 | 20 个实体基础渲染低于 100ms | node --test tests/pen_stroke.test.js | 20 个实体连续 base 渲染总耗时 < 100ms | 通过 | tests/pen_stroke.test.js: 性能测试 |
-| A24 | 完整精绘在基础画面出现后 500ms 内完成 | app.js 代码结构 | 使用 requestAnimationFrame 调度 full 渲染 | 通过 | static/app.js: scheduleFrame 机制 |
+| A23 | 20 个实体基础渲染低于 100ms | node --test tests/pen_stroke.test.js | 20 个实体连续 base 渲染总耗时 < 100ms | 通过 | tests/pen_stroke.test.js: 性能测试（mock DOM 环境） |
+| A24 | 完整精绘在基础画面出现后 500ms 内完成 | 代码结构 + 真机测量 | requestAnimationFrame 调度，实际耗时需在目标设备测量 | 待真实验证 | static/app.js: scheduleFrame 机制；真机延迟未测量 |
 | A25 | 不修改工程状态、动作协议或撤销历史 | node --test tests/*.test.js 全量 | model/parser 测试全过 | 通过 | tests/model.test.js, tests/parser.test.js 全过 |
 | A26 | 所有效果由本地可信 SVG 渲染器生成 | 代码检查 | 无外部 URL、无模型原始 SVG 注入 | 通过 | static/templates.js: 所有路径本地计算 |
 

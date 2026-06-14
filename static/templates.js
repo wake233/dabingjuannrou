@@ -117,8 +117,25 @@ function penLineToGroup(group, points, options = {}) {
     "stroke-linejoin": "round",
     "data-line-tier": (options.tier || "structure")
   });
+  if (options.closed) el.setAttribute("data-closed", "true");
   group.appendChild(el);
   return el;
+}
+
+function addHatching(group, bounds, angle, spacing, count, stroke, tier, rng) {
+  const lines = generateHatchLines(bounds, angle, spacing, rng, count);
+  for (const d of lines) {
+    const el = node("path", {
+      d,
+      fill: "none",
+      stroke: stroke || PALETTE.ink,
+      "stroke-width": ((tier || LINE_TIERS.texture).width * 1.5).toFixed(2),
+      opacity: (tier || LINE_TIERS.texture).opacity.toFixed(2),
+      "stroke-linecap": "round",
+      "data-line-tier": (tier || LINE_TIERS.texture).label
+    });
+    group.appendChild(el);
+  }
 }
 
 function shadowEllipse(group, cx, cy, rx, ry, fill, opacity) {
@@ -150,126 +167,185 @@ function renderPerson(entity, quality, namespace) {
   const group = node("g", { "data-template": "person", "data-art-style": "storybook-layered" });
   const ink = PALETTE.ink;
   const sw = Math.max(1.8, Math.min(w, h) * 0.016);
-
-  // Shadow
-  shadowEllipse(group, w * 0.5, h * 0.96, w * 0.3, h * 0.025, PALETTE.night, 0.18);
-
-  // Legs
-  const legPoints = pose === "walking"
-    ? [[w * 0.44, h * 0.68], [w * 0.36, h * 0.94], [w * 0.4, h * 0.96],
-       [w * 0.54, h * 0.68], [w * 0.66, h * 0.94], [w * 0.7, h * 0.96]]
-    : [[w * 0.44, h * 0.7], [w * 0.40, h * 0.94], [w * 0.42, h * 0.95],
-       [w * 0.56, h * 0.7], [w * 0.60, h * 0.94], [w * 0.58, h * 0.95]];
-
-  penLineToGroup(group, legPoints.slice(0, 3), { tier: "outline", baseWidth: sw, stroke: ink, rng });
-  penLineToGroup(group, legPoints.slice(3), { tier: "outline", baseWidth: sw, stroke: ink, rng });
-
-  // Feet
   const isWoman = variant === "woman";
-  const lfx = pose === "walking" ? w * 0.30 : w * 0.36;
-  const rfx = pose === "walking" ? w * 0.72 : w * 0.60;
-  penLineToGroup(group, [[lfx - w * 0.04, h * 0.96], [lfx + w * 0.06, h * 0.96], [lfx + w * 0.08, h * 0.94]],
-    { tier: "outline", baseWidth: sw * 1.2, stroke: PALETTE.deepInk, rng });
-  penLineToGroup(group, [[rfx - w * 0.04, h * 0.96], [rfx + w * 0.06, h * 0.96], [rfx + w * 0.08, h * 0.94]],
-    { tier: "outline", baseWidth: sw * 1.2, stroke: PALETTE.deepInk, rng });
+  const isWalking = pose === "walking";
 
-  // Body / torso
-  const bodyPath = isWoman
-    ? [[w * 0.35, h * 0.35], [w * 0.30, h * 0.50], [w * 0.28, h * 0.68],
-       [w * 0.72, h * 0.68], [w * 0.70, h * 0.50], [w * 0.65, h * 0.35]]
-    : [[w * 0.38, h * 0.32], [w * 0.34, h * 0.50], [w * 0.36, h * 0.68],
-       [w * 0.64, h * 0.68], [w * 0.66, h * 0.50], [w * 0.62, h * 0.32]];
+  // Ground shadow
+  shadowEllipse(group, w * 0.50, h * 0.965, w * 0.32, h * 0.025, PALETTE.night, 0.20);
 
-  // Body fill
-  add(group, "path", {
-    d: `M${bodyPath.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ")} Z`,
-    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`,
-    stroke: "none",
-    "data-color-block": "body"
-  });
+  // === FEET & SHOES ===
+  const lfx = isWalking ? w * 0.30 : w * 0.36;
+  const rfx = isWalking ? w * 0.72 : w * 0.60;
+  const footY = h * 0.95;
+  // Left foot - more organic shape
+  penLineToGroup(group, [
+    [lfx - w * 0.05, footY], [lfx - w * 0.03, footY - h * 0.02],
+    [lfx - w * 0.01, footY - h * 0.025], [lfx + w * 0.02, footY - h * 0.022],
+    [lfx + w * 0.06, footY - h * 0.015], [lfx + w * 0.09, footY],
+    [lfx + w * 0.07, footY + h * 0.008]
+  ], { tier: "outline", baseWidth: sw * 1.4, stroke: PALETTE.deepInk, rng });
+  // Right foot
+  penLineToGroup(group, [
+    [rfx - w * 0.05, footY], [rfx - w * 0.03, footY - h * 0.02],
+    [rfx - w * 0.01, footY - h * 0.025], [rfx + w * 0.02, footY - h * 0.022],
+    [rfx + w * 0.06, footY - h * 0.015], [rfx + w * 0.09, footY],
+    [rfx + w * 0.07, footY + h * 0.008]
+  ], { tier: "outline", baseWidth: sw * 1.4, stroke: PALETTE.deepInk, rng });
 
-  penLineToGroup(group, bodyPath.concat([bodyPath[0]]), {
-    tier: "outline", baseWidth: sw, stroke: ink, rng, closed: true
-  });
+  // === LEGS ===
+  const hipY = h * 0.50;
+  const kneeY = h * 0.72;
+  const lLegPts = isWalking
+    ? [[w * 0.38, hipY], [w * 0.34, kneeY], [w * 0.30, h * 0.84], [lfx, footY - h * 0.01]]
+    : [[w * 0.40, hipY], [w * 0.38, kneeY], [w * 0.37, h * 0.84], [lfx, footY - h * 0.01]];
+  const rLegPts = isWalking
+    ? [[w * 0.62, hipY], [w * 0.66, kneeY], [w * 0.70, h * 0.84], [rfx, footY - h * 0.01]]
+    : [[w * 0.60, hipY], [w * 0.62, kneeY], [w * 0.63, h * 0.84], [rfx, footY - h * 0.01]];
+  penLineToGroup(group, lLegPts, { tier: "outline", baseWidth: sw * 1.3, stroke: ink, rng });
+  penLineToGroup(group, rLegPts, { tier: "outline", baseWidth: sw * 1.3, stroke: ink, rng });
 
-  // Belt / waist line
+  // === BODY / TORSO ===
+  const shoulderY = h * 0.30;
+  const waistY = h * 0.50;
+  const bodyPts = isWoman
+    ? [[w * 0.34, shoulderY], [w * 0.32, h * 0.38], [w * 0.29, waistY],
+       [w * 0.28, h * 0.58], [w * 0.27, h * 0.68],
+       [w * 0.73, h * 0.68], [w * 0.72, h * 0.58], [w * 0.71, waistY],
+       [w * 0.68, h * 0.38], [w * 0.66, shoulderY]]
+    : [[w * 0.36, shoulderY], [w * 0.34, h * 0.38], [w * 0.33, waistY],
+       [w * 0.35, h * 0.60], [w * 0.36, h * 0.68],
+       [w * 0.64, h * 0.68], [w * 0.65, h * 0.60], [w * 0.67, waistY],
+       [w * 0.66, h * 0.38], [w * 0.64, shoulderY]];
+  const bodyD = `M${bodyPts.map(p => p.map(v => v.toFixed(1)).join(",")).join(" L")} Z`;
+  add(group, "path", { d: bodyD, fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: "none", "data-color-block": "body" });
+  penLineToGroup(group, [...bodyPts, bodyPts[0]], { tier: "outline", baseWidth: sw, stroke: ink, rng, closed: true });
+
+  // === CLOTHING DETAILS ===
   if (isFull) {
-    penLineToGroup(group, [[w * 0.35, h * 0.50], [w * 0.50, h * 0.51], [w * 0.65, h * 0.50]],
-      { tier: "structure", baseWidth: sw * 0.8, stroke: accent, rng });
-  }
-
-  // Arms
-  const armRelaxed = pose !== "walking";
-  const lShoulderX = w * 0.34, lShoulderY = h * 0.38;
-  const rShoulderX = w * 0.66, rShoulderY = h * 0.38;
-  const lElbowX = armRelaxed ? w * 0.20 : w * 0.28, lElbowY = armRelaxed ? h * 0.52 : h * 0.46;
-  const lHandX = armRelaxed ? w * 0.16 : w * 0.22, lHandY = armRelaxed ? h * 0.66 : h * 0.60;
-  const rElbowX = armRelaxed ? w * 0.80 : w * 0.72, rElbowY = armRelaxed ? h * 0.52 : h * 0.46;
-  const rHandX = armRelaxed ? w * 0.84 : w * 0.78, rHandY = armRelaxed ? h * 0.66 : h * 0.60;
-
-  penLineToGroup(group, [[lShoulderX, lShoulderY], [lElbowX, lElbowY], [lHandX, lHandY]],
-    { tier: "outline", baseWidth: sw * 0.75, stroke: ink, rng });
-  penLineToGroup(group, [[rShoulderX, rShoulderY], [rElbowX, rElbowY], [rHandX, rHandY]],
-    { tier: "outline", baseWidth: sw * 0.75, stroke: ink, rng });
-
-  if (isFull) {
-    // Arm structure lines
-    penLineToGroup(group, [[lElbowX, lElbowY - h * 0.02], [lElbowX, lElbowY + h * 0.02]],
-      { tier: "structure", baseWidth: sw * 0.45, stroke: PALETTE.deepInk, rng });
-    penLineToGroup(group, [[rElbowX, rElbowY - h * 0.02], [rElbowX, rElbowY + h * 0.02]],
-      { tier: "structure", baseWidth: sw * 0.45, stroke: PALETTE.deepInk, rng });
-  }
-
-  // Head
-  add(group, "ellipse", {
-    cx: (w * 0.5).toFixed(1), cy: (h * 0.20).toFixed(1),
-    rx: (w * 0.11).toFixed(1), ry: (h * 0.11).toFixed(1),
-    fill: PALETTE.skin, stroke: ink, "stroke-width": sw.toFixed(2)
-  });
-
-  // Hair
-  const hairColor = variant === "woman" ? PALETTE.deepInk : shade(PALETTE.deepInk, -10);
-  const hairPath = isWoman
-    ? [[w * 0.37, h * 0.18], [w * 0.36, h * 0.10], [w * 0.45, h * 0.06],
-       [w * 0.55, h * 0.06], [w * 0.64, h * 0.10], [w * 0.63, h * 0.18],
-       [w * 0.60, h * 0.14], [w * 0.50, h * 0.12], [w * 0.40, h * 0.14]]
-    : [[w * 0.38, h * 0.18], [w * 0.39, h * 0.12], [w * 0.46, h * 0.09],
-       [w * 0.54, h * 0.09], [w * 0.62, h * 0.12], [w * 0.62, h * 0.18]];
-
-  add(group, "path", {
-    d: `M${hairPath.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" L")} Z`,
-    fill: hairColor, stroke: ink, "stroke-width": sw.toFixed(2)
-  });
-
-  if (isFull) {
-    // Facial features
-    const faceLeft = w * 0.43, faceRight = w * 0.57, faceY = h * 0.21;
-    penLineToGroup(group, [[faceLeft, faceY], [faceLeft + w * 0.015, faceY - h * 0.01]],
-      { tier: "structure", baseWidth: sw * 0.5, stroke: ink, rng });
-    penLineToGroup(group, [[faceRight, faceY], [faceRight - w * 0.015, faceY - h * 0.01]],
-      { tier: "structure", baseWidth: sw * 0.5, stroke: ink, rng });
-    // Mouth
-    penLineToGroup(group, [[w * 0.48, h * 0.26], [w * 0.50, h * 0.265], [w * 0.52, h * 0.26]],
-      { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.rose, rng });
-    // Hair detail
-    repeat(group, isWoman ? 5 : 3, i => {
-      penLineToGroup(group, [[w * (0.39 + i * 0.05), h * 0.12], [w * (0.40 + i * 0.05), h * 0.08]],
-        { tier: "texture", baseWidth: sw * 0.35, stroke: hairColor, rng });
+    // Collar
+    const collarY = h * 0.31;
+    penLineToGroup(group, [[w * 0.40, collarY], [w * 0.44, collarY + h * 0.03], [w * 0.50, collarY], [w * 0.56, collarY + h * 0.03], [w * 0.60, collarY]],
+      { tier: "structure", baseWidth: sw * 0.55, stroke: shade(color, -25), rng });
+    // Collar inner V
+    penLineToGroup(group, [[w * 0.43, collarY + h * 0.02], [w * 0.50, collarY + h * 0.05], [w * 0.57, collarY + h * 0.02]],
+      { tier: "structure", baseWidth: sw * 0.4, stroke: accent, rng });
+    // Belt/waist
+    penLineToGroup(group, [[w * 0.33, waistY - h * 0.01], [w * 0.50, waistY + h * 0.01], [w * 0.67, waistY - h * 0.01]],
+      { tier: "structure", baseWidth: sw * 0.8, stroke: shade(color, -20), rng });
+    penLineToGroup(group, [[w * 0.33, waistY + h * 0.02], [w * 0.50, waistY + h * 0.04], [w * 0.67, waistY + h * 0.02]],
+      { tier: "structure", baseWidth: sw * 0.8, stroke: shade(color, -20), rng });
+    // Fabric folds on torso
+    repeat(group, 5, i => {
+      penLineToGroup(group, [[w * (0.31 + i * 0.07), h * (0.38 + (i % 3) * 0.04)], [w * (0.33 + i * 0.07), h * (0.42 + (i % 3) * 0.04)]],
+        { tier: "texture", baseWidth: sw * 0.3, stroke: shade(color, -12), rng });
     });
   }
 
-  // Skirt for woman variant
+  // === ARMS ===
+  const lShX = w * 0.35, rShX = w * 0.65, shY = shoulderY + h * 0.02;
+  const armRelaxed = !isWalking;
+  const lElbX = armRelaxed ? w * 0.18 : w * 0.26, lElbY = armRelaxed ? h * 0.46 : h * 0.42;
+  const lHndX = armRelaxed ? w * 0.14 : w * 0.20, lHndY = armRelaxed ? h * 0.60 : h * 0.54;
+  const rElbX = armRelaxed ? w * 0.82 : w * 0.74, rElbY = armRelaxed ? h * 0.46 : h * 0.42;
+  const rHndX = armRelaxed ? w * 0.86 : w * 0.80, rHndY = armRelaxed ? h * 0.60 : h * 0.54;
+  penLineToGroup(group, [[lShX, shY], [lElbX - w * 0.01, lElbY - h * 0.01], [lElbX, lElbY], [lElbX + w * 0.01, lElbY + h * 0.01], [lHndX, lHndY]],
+    { tier: "outline", baseWidth: sw * 0.8, stroke: ink, rng });
+  penLineToGroup(group, [[rShX, shY], [rElbX + w * 0.01, rElbY - h * 0.01], [rElbX, rElbY], [rElbX - w * 0.01, rElbY + h * 0.01], [rHndX, rHndY]],
+    { tier: "outline", baseWidth: sw * 0.8, stroke: ink, rng });
+  if (isFull) {
+    // Elbow joint lines
+    penLineToGroup(group, [[lElbX - w * 0.015, lElbY - h * 0.015], [lElbX + w * 0.015, lElbY + h * 0.01]],
+      { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.deepInk, rng });
+    penLineToGroup(group, [[rElbX + w * 0.015, rElbY - h * 0.015], [rElbX - w * 0.015, rElbY + h * 0.01]],
+      { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.deepInk, rng });
+    // Hands
+    penLineToGroup(group, [[lHndX - w * 0.02, lHndY - h * 0.01], [lHndX + w * 0.02, lHndY + h * 0.01]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: PALETTE.skin, rng });
+    penLineToGroup(group, [[rHndX - w * 0.02, rHndY - h * 0.01], [rHndX + w * 0.02, rHndY + h * 0.01]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: PALETTE.skin, rng });
+  }
+
+  // === HEAD ===
+  const headCx = w * 0.50, headCy = h * 0.19, headRx = w * 0.105, headRy = h * 0.11;
+  add(group, "ellipse", {
+    cx: headCx.toFixed(1), cy: headCy.toFixed(1),
+    rx: headRx.toFixed(1), ry: headRy.toFixed(1),
+    fill: PALETTE.skin, stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+  // Neck
+  penLineToGroup(group, [[w * 0.46, h * 0.28], [w * 0.46, h * 0.30], [w * 0.54, h * 0.30], [w * 0.54, h * 0.28]],
+    { tier: "outline", baseWidth: sw * 0.7, stroke: ink, rng });
+
+  // === HAIR ===
+  const hairColor = isWoman ? PALETTE.deepInk : shade(PALETTE.deepInk, -10);
   if (isWoman) {
-    const skirtTop = h * 0.50;
+    const hairPts = [
+      [w * 0.375, h * 0.17], [w * 0.36, h * 0.12], [w * 0.37, h * 0.07],
+      [w * 0.42, h * 0.04], [w * 0.48, h * 0.03], [w * 0.54, h * 0.04],
+      [w * 0.59, h * 0.07], [w * 0.63, h * 0.12], [w * 0.625, h * 0.17],
+      [w * 0.61, h * 0.13], [w * 0.55, h * 0.10], [w * 0.50, h * 0.09],
+      [w * 0.45, h * 0.10], [w * 0.39, h * 0.13]
+    ];
+    add(group, "path", { d: `M${hairPts.map(p => p.map(v => v.toFixed(1)).join(",")).join(" L")} Z`, fill: hairColor, stroke: ink, "stroke-width": sw.toFixed(2) });
+    // Long side hair
     add(group, "path", {
-      d: `M${(w * 0.33).toFixed(1)} ${skirtTop.toFixed(1)} L${(w * 0.20).toFixed(1)} ${(h * 0.84).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.92).toFixed(1)} ${(w * 0.80).toFixed(1)} ${(h * 0.84).toFixed(1)} L${(w * 0.67).toFixed(1)} ${skirtTop.toFixed(1)} Z`,
+      d: `M${(w * 0.375).toFixed(1)} ${(h * 0.16).toFixed(1)} Q${(w * 0.34).toFixed(1)} ${(h * 0.26).toFixed(1)} ${(w * 0.36).toFixed(1)} ${(h * 0.34).toFixed(1)} L${(w * 0.39).toFixed(1)} ${(h * 0.30).toFixed(1)} Q${(w * 0.38).toFixed(1)} ${(h * 0.24).toFixed(1)} ${(w * 0.40).toFixed(1)} ${(h * 0.17).toFixed(1)} Z`,
+      fill: hairColor, stroke: ink, "stroke-width": sw.toFixed(2)
+    });
+    add(group, "path", {
+      d: `M${(w * 0.625).toFixed(1)} ${(h * 0.16).toFixed(1)} Q${(w * 0.66).toFixed(1)} ${(h * 0.26).toFixed(1)} ${(w * 0.64).toFixed(1)} ${(h * 0.34).toFixed(1)} L${(w * 0.61).toFixed(1)} ${(h * 0.30).toFixed(1)} Q${(w * 0.62).toFixed(1)} ${(h * 0.24).toFixed(1)} ${(w * 0.60).toFixed(1)} ${(h * 0.17).toFixed(1)} Z`,
+      fill: hairColor, stroke: ink, "stroke-width": sw.toFixed(2)
+    });
+  } else {
+    const hairPts = [
+      [w * 0.385, h * 0.17], [w * 0.38, h * 0.13], [w * 0.39, h * 0.09],
+      [w * 0.44, h * 0.07], [w * 0.50, h * 0.06], [w * 0.56, h * 0.07],
+      [w * 0.61, h * 0.09], [w * 0.62, h * 0.13], [w * 0.62, h * 0.17]
+    ];
+    add(group, "path", { d: `M${hairPts.map(p => p.map(v => v.toFixed(1)).join(",")).join(" L")} Z`, fill: hairColor, stroke: ink, "stroke-width": sw.toFixed(2) });
+  }
+
+  // === FACIAL FEATURES ===
+  if (isFull) {
+    // Eyebrows
+    penLineToGroup(group, [[w * 0.425, h * 0.17], [w * 0.44, h * 0.162], [w * 0.455, h * 0.17]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: hairColor, rng });
+    penLineToGroup(group, [[w * 0.545, h * 0.17], [w * 0.56, h * 0.162], [w * 0.575, h * 0.17]],
+      { tier: "structure", baseWidth: sw * 0.5, stroke: hairColor, rng });
+    // Eyes
+    penLineToGroup(group, [[w * 0.435, h * 0.19], [w * 0.45, h * 0.185]],
+      { tier: "outline", baseWidth: sw * 0.55, stroke: ink, rng });
+    penLineToGroup(group, [[w * 0.55, h * 0.185], [w * 0.565, h * 0.19]],
+      { tier: "outline", baseWidth: sw * 0.55, stroke: ink, rng });
+    // Nose
+    penLineToGroup(group, [[w * 0.50, h * 0.19], [w * 0.498, h * 0.21], [w * 0.505, h * 0.212]],
+      { tier: "structure", baseWidth: sw * 0.35, stroke: shade(PALETTE.skin, -30), rng });
+    // Mouth
+    penLineToGroup(group, [[w * 0.47, h * 0.24], [w * 0.50, h * 0.245], [w * 0.53, h * 0.24]],
+      { tier: "structure", baseWidth: sw * 0.45, stroke: PALETTE.rose, rng });
+    // Hair texture lines
+    repeat(group, isWoman ? 7 : 4, i => {
+      penLineToGroup(group, [[w * (0.40 + i * 0.03), h * 0.10], [w * (0.41 + i * 0.03), h * 0.065]],
+        { tier: "texture", baseWidth: sw * 0.28, stroke: shade(hairColor, 20), rng });
+    });
+  }
+
+  // === SKIRT/DRESS (woman) ===
+  if (isWoman) {
+    const skTop = h * 0.50;
+    add(group, "path", {
+      d: `M${(w * 0.30).toFixed(1)} ${skTop.toFixed(1)} L${(w * 0.22).toFixed(1)} ${(h * 0.78).toFixed(1)} Q${(w * 0.16).toFixed(1)} ${(h * 0.86).toFixed(1)} ${(w * 0.50).toFixed(1)} ${(h * 0.90).toFixed(1)} Q${(w * 0.84).toFixed(1)} ${(h * 0.86).toFixed(1)} ${(w * 0.78).toFixed(1)} ${(h * 0.78).toFixed(1)} L${(w * 0.70).toFixed(1)} ${skTop.toFixed(1)} Z`,
       fill: shade(color, 12), stroke: ink, "stroke-width": sw.toFixed(2)
     });
     if (isFull) {
-      repeat(group, 6, i => {
-        penLineToGroup(group, [[w * (0.25 + i * 0.09), skirtTop + h * 0.02], [w * (0.22 + i * 0.09), h * 0.82]],
-          { tier: "texture", baseWidth: sw * 0.3, stroke: shade(color, -10), rng });
+      // Skirt pleat lines
+      repeat(group, 7, i => {
+        penLineToGroup(group, [[w * (0.23 + i * 0.08), skTop], [w * (0.20 + i * 0.08), h * 0.84]],
+          { tier: "texture", baseWidth: sw * 0.28, stroke: shade(color, -8), rng });
       });
+      // Skirt hem
+      penLineToGroup(group, [[w * 0.17, h * 0.85], [w * 0.50, h * 0.89], [w * 0.83, h * 0.85]],
+        { tier: "structure", baseWidth: sw * 0.5, stroke: shade(color, -15), rng });
     }
   }
 
@@ -288,61 +364,82 @@ function renderCat(entity, quality, namespace) {
   const ink = PALETTE.ink;
   const sw = Math.max(1.8, Math.min(w, h) * 0.016);
 
-  shadowEllipse(group, w * 0.48, h * 0.93, w * 0.38, h * 0.05);
+  shadowEllipse(group, w * 0.48, h * 0.94, w * 0.40, h * 0.05);
 
-  // Body
-  add(group, "ellipse", {
-    cx: (w * 0.46).toFixed(1), cy: (h * 0.63).toFixed(1),
-    rx: (w * 0.33).toFixed(1), ry: (h * 0.26).toFixed(1),
-    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
-  });
+  // === BODY (organic oval with pointed ends) ===
+  const bodyPts = [
+    [w * 0.18, h * 0.60], [w * 0.16, h * 0.66], [w * 0.22, h * 0.78],
+    [w * 0.34, h * 0.86], [w * 0.50, h * 0.88], [w * 0.66, h * 0.84],
+    [w * 0.76, h * 0.72], [w * 0.74, h * 0.60], [w * 0.62, h * 0.52],
+    [w * 0.44, h * 0.50], [w * 0.28, h * 0.52]
+  ];
+  const bodyD = `M${bodyPts.map(p => p.map(v => v.toFixed(1)).join(",")).join(" L")} Z`;
+  add(group, "path", { d: bodyD, fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: "none" });
+  penLineToGroup(group, [...bodyPts, bodyPts[0]], { tier: "outline", baseWidth: sw, stroke: ink, rng, closed: true });
 
-  // Head
-  add(group, "circle", {
-    cx: (w * 0.68).toFixed(1), cy: (h * 0.36).toFixed(1),
-    r: (h * 0.21).toFixed(1),
-    fill: shade(color, 15), stroke: ink, "stroke-width": sw.toFixed(2)
-  });
+  // === HEAD (slightly flattened circle) ===
+  const headCx = w * 0.68, headCy = h * 0.36;
+  add(group, "ellipse", { cx: headCx.toFixed(1), cy: headCy.toFixed(1), rx: (h * 0.23).toFixed(1), ry: (h * 0.20).toFixed(1), fill: shade(color, 15), stroke: ink, "stroke-width": sw.toFixed(2) });
 
-  // Ears
-  penLineToGroup(group, [[w * 0.58, h * 0.22], [w * 0.63, h * 0.02], [w * 0.70, h * 0.20]],
-    { tier: "outline", baseWidth: sw, stroke: ink, rng });
-  penLineToGroup(group, [[w * 0.76, h * 0.18], [w * 0.83, h * 0.02], [w * 0.86, h * 0.22]],
-    { tier: "outline", baseWidth: sw, stroke: ink, rng });
+  // === EARS (triangular with inner detail) ===
+  penLineToGroup(group, [[w * 0.56, h * 0.22], [w * 0.60, h * 0.04], [w * 0.64, h * 0.06], [w * 0.69, h * 0.20]],
+    { tier: "outline", baseWidth: sw * 0.9, stroke: ink, rng });
+  penLineToGroup(group, [[w * 0.74, h * 0.18], [w * 0.80, h * 0.04], [w * 0.84, h * 0.06], [w * 0.86, h * 0.22]],
+    { tier: "outline", baseWidth: sw * 0.9, stroke: ink, rng });
+  // Inner ear
+  if (isFull) {
+    penLineToGroup(group, [[w * 0.60, h * 0.16], [w * 0.62, h * 0.10], [w * 0.66, h * 0.18]],
+      { tier: "structure", baseWidth: sw * 0.35, stroke: PALETTE.rose, rng });
+    penLineToGroup(group, [[w * 0.78, h * 0.14], [w * 0.80, h * 0.10], [w * 0.83, h * 0.18]],
+      { tier: "structure", baseWidth: sw * 0.35, stroke: PALETTE.rose, rng });
+  }
 
-  // Tail
-  const tailCurve = isFull
-    ? [[w * 0.20, h * 0.66], [w * 0.06, h * 0.52], [w * 0.01, h * 0.35], [w * 0.10, h * 0.22]]
-    : [[w * 0.20, h * 0.66], [w * 0.08, h * 0.48], [w * 0.10, h * 0.28]];
-  penLineToGroup(group, tailCurve, {
-    tier: "outline", baseWidth: sw * 0.7, stroke: ink, rng
-  });
+  // === LEGS (front paws visible) ===
+  penLineToGroup(group, [[w * 0.28, h * 0.74], [w * 0.22, h * 0.88], [w * 0.24, h * 0.93]],
+    { tier: "outline", baseWidth: sw * 1.1, stroke: PALETTE.deepInk, rng });
+  penLineToGroup(group, [[w * 0.62, h * 0.72], [w * 0.64, h * 0.88], [w * 0.66, h * 0.93]],
+    { tier: "outline", baseWidth: sw * 1.1, stroke: PALETTE.deepInk, rng });
+
+  // === TAIL (curving up and around) ===
+  const tailPts = isFull
+    ? [[w * 0.20, h * 0.64], [w * 0.08, h * 0.56], [w * 0.03, h * 0.44], [w * 0.04, h * 0.32], [w * 0.08, h * 0.24], [w * 0.14, h * 0.20]]
+    : [[w * 0.20, h * 0.64], [w * 0.06, h * 0.48], [w * 0.08, h * 0.28], [w * 0.14, h * 0.22]];
+  penLineToGroup(group, tailPts, { tier: "outline", baseWidth: sw * 0.7, stroke: ink, rng });
 
   if (isFull) {
-    // Face
-    penLineToGroup(group, [[w * 0.62, h * 0.36], [w * 0.65, h * 0.37]],
-      { tier: "structure", baseWidth: sw * 0.5, stroke: ink, rng });
-    penLineToGroup(group, [[w * 0.74, h * 0.36], [w * 0.77, h * 0.37]],
-      { tier: "structure", baseWidth: sw * 0.5, stroke: ink, rng });
-    penLineToGroup(group, [[w * 0.68, h * 0.42], [w * 0.70, h * 0.44], [w * 0.73, h * 0.42]],
-      { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.rose, rng });
-    // Whiskers
-    const whiskerBase = [w * 0.68, h * 0.40];
+    // === FACE DETAILS ===
+    // Eyes (almond shaped)
+    penLineToGroup(group, [[w * 0.61, h * 0.33], [w * 0.64, h * 0.31], [w * 0.66, h * 0.33]],
+      { tier: "outline", baseWidth: sw * 0.6, stroke: ink, rng });
+    penLineToGroup(group, [[w * 0.72, h * 0.33], [w * 0.75, h * 0.31], [w * 0.77, h * 0.33]],
+      { tier: "outline", baseWidth: sw * 0.6, stroke: ink, rng });
+    // Pupils
+    add(group, "circle", { cx: (w * 0.64).toFixed(1), cy: (h * 0.32).toFixed(1), r: (sw * 0.5).toFixed(2), fill: PALETTE.deepInk, stroke: "none" });
+    add(group, "circle", { cx: (w * 0.74).toFixed(1), cy: (h * 0.32).toFixed(1), r: (sw * 0.5).toFixed(2), fill: PALETTE.deepInk, stroke: "none" });
+    // Nose
+    add(group, "path", { d: `M${(w * 0.68).toFixed(1)} ${(h * 0.39).toFixed(1)} L${(w * 0.70).toFixed(1)} ${(h * 0.40).toFixed(1)} L${(w * 0.72).toFixed(1)} ${(h * 0.39).toFixed(1)} Z`, fill: PALETTE.rose, stroke: "none" });
+    // Mouth lines
+    penLineToGroup(group, [[w * 0.70, h * 0.40], [w * 0.68, h * 0.42]],
+      { tier: "structure", baseWidth: sw * 0.35, stroke: ink, rng });
+    penLineToGroup(group, [[w * 0.70, h * 0.40], [w * 0.72, h * 0.42]],
+      { tier: "structure", baseWidth: sw * 0.35, stroke: ink, rng });
+
+    // === WHISKERS ===
+    const wBase = [w * 0.68, h * 0.38];
     repeat(group, 6, i => {
-      const a = -0.5 + i * 0.2;
-      penLineToGroup(group, [whiskerBase, [whiskerBase[0] + Math.cos(a) * w * 0.18, whiskerBase[1] + Math.sin(a) * h * 0.04]],
-        { tier: "texture", baseWidth: sw * 0.25, stroke: ink, rng });
+      const a = -0.6 + i * 0.22;
+      const len = w * (0.14 + (i % 2) * 0.06);
+      penLineToGroup(group, [wBase, [wBase[0] + Math.cos(a) * len, wBase[1] + Math.sin(a) * h * 0.03]],
+        { tier: "texture", baseWidth: sw * 0.22, stroke: ink, rng });
     });
-    // Fur texture
-    repeat(group, 8, i => {
-      const furX = w * (0.22 + i * 0.06), furY = h * (0.50 + (i % 3) * 0.06);
-      penLineToGroup(group, [[furX, furY], [furX + w * 0.02, furY - h * 0.02]],
-        { tier: "texture", baseWidth: sw * 0.2, stroke: shade(color, -10), rng });
-    });
-    // Stripe markings
-    repeat(group, 4, i => {
-      penLineToGroup(group, [[w * (0.28 + i * 0.08), h * 0.55], [w * (0.26 + i * 0.08), h * 0.60]],
-        { tier: "structure", baseWidth: sw * 0.4, stroke: shade(color, -20), rng });
+
+    // === FUR TEXTURE (hatching on body) ===
+    addHatching(group, { x: w * 0.20, y: h * 0.56, width: w * 0.50, height: h * 0.28 }, -30, 10, rng, 8, shade(color, -8), LINE_TIERS.texture);
+    // Individual fur strokes
+    repeat(group, 10, i => {
+      const fx = w * (0.22 + i * 0.05), fy = h * (0.55 + (i % 4) * 0.05);
+      penLineToGroup(group, [[fx, fy], [fx + w * 0.015, fy - h * 0.025]],
+        { tier: "texture", baseWidth: sw * 0.18, stroke: shade(color, -8), rng });
     });
   }
 
@@ -518,43 +615,77 @@ function renderStreetlamp(entity, quality, namespace) {
   const ink = PALETTE.ink;
   const sw = Math.max(1.8, Math.min(w, h) * 0.017);
 
-  // Light glow
-  add(group, "ellipse", {
-    cx: (w * 0.50).toFixed(1), cy: (h * 0.34).toFixed(1),
-    rx: (w * 0.48).toFixed(1), ry: (h * 0.32).toFixed(1),
-    fill: accent, opacity: "0.12", stroke: "none"
-  });
+  // Light glow (radial)
+  const glowCx = w * 0.50, glowCy = h * 0.30;
+  add(group, "ellipse", { cx: glowCx.toFixed(1), cy: glowCy.toFixed(1), rx: (w * 0.52).toFixed(1), ry: (h * 0.34).toFixed(1), fill: accent, opacity: "0.08", stroke: "none" });
+  add(group, "ellipse", { cx: glowCx.toFixed(1), cy: glowCy.toFixed(1), rx: (w * 0.32).toFixed(1), ry: (h * 0.20).toFixed(1), fill: accent, opacity: "0.10", stroke: "none" });
 
-  // Pole
-  penLineToGroup(group, [[w * 0.50, h * 0.28], [w * 0.50, h * 0.92]],
+  // === POLE ===
+  const poleTop = h * 0.24;
+  const poleBot = h * 0.92;
+  penLineToGroup(group, [[w * 0.48, poleTop], [w * 0.50, h * 0.50], [w * 0.51, h * 0.70], [w * 0.50, poleBot]],
     { tier: "outline", baseWidth: sw * 2.2, stroke: ink, rng });
 
-  // Base
-  penLineToGroup(group, [[w * 0.28, h * 0.95], [w * 0.50, h * 0.90], [w * 0.72, h * 0.95]],
-    { tier: "outline", baseWidth: sw * 2.0, stroke: ink, rng });
-
-  // Lamp housing
+  // === BASE ===
+  // Ornamental base - trapezoidal
   add(group, "path", {
-    d: `M${(w * 0.34).toFixed(1)} ${(h * 0.10).toFixed(1)} L${(w * 0.66).toFixed(1)} ${(h * 0.10).toFixed(1)} L${(w * 0.74).toFixed(1)} ${(h * 0.32).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.40).toFixed(1)} ${(w * 0.26).toFixed(1)} ${(h * 0.32).toFixed(1)} Z`,
+    d: `M${(w * 0.30).toFixed(1)} ${(h * 0.94).toFixed(1)} L${(w * 0.36).toFixed(1)} ${(h * 0.88).toFixed(1)} L${(w * 0.64).toFixed(1)} ${(h * 0.88).toFixed(1)} L${(w * 0.70).toFixed(1)} ${(h * 0.94).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.97).toFixed(1)} ${(w * 0.30).toFixed(1)} ${(h * 0.94).toFixed(1)} Z`,
+    fill: shade(color, -10), stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+  // Base detail ring
+  penLineToGroup(group, [[w * 0.34, h * 0.90], [w * 0.50, h * 0.91], [w * 0.66, h * 0.90]],
+    { tier: "structure", baseWidth: sw * 1.0, stroke: shade(color, 20), rng });
+
+  // === LAMP HOUSING ===
+  // Main lantern body - more ornate shape
+  const lTop = h * 0.04, lBot = h * 0.26;
+  add(group, "path", {
+    d: `M${(w * 0.30).toFixed(1)} ${(h * 0.12).toFixed(1)} L${(w * 0.32).toFixed(1)} ${(h * 0.07).toFixed(1)} L${(w * 0.68).toFixed(1)} ${(h * 0.07).toFixed(1)} L${(w * 0.70).toFixed(1)} ${(h * 0.12).toFixed(1)} Q${(w * 0.78).toFixed(1)} ${(h * 0.20).toFixed(1)} ${(w * 0.74).toFixed(1)} ${(h * 0.28).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.36).toFixed(1)} ${(w * 0.26).toFixed(1)} ${(h * 0.28).toFixed(1)} Q${(w * 0.22).toFixed(1)} ${(h * 0.20).toFixed(1)} ${(w * 0.30).toFixed(1)} ${(h * 0.12).toFixed(1)} Z`,
     fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
   });
+  // Roof cap
+  add(group, "path", {
+    d: `M${(w * 0.35).toFixed(1)} ${(h * 0.07).toFixed(1)} L${(w * 0.50).toFixed(1)} ${(-h * 0.01).toFixed(1)} L${(w * 0.65).toFixed(1)} ${(h * 0.07).toFixed(1)} Z`,
+    fill: shade(color, -15), stroke: ink, "stroke-width": sw.toFixed(2)
+  });
+  // Finial
+  add(group, "circle", { cx: (w * 0.50).toFixed(1), cy: (h * 0.01).toFixed(1), r: (sw * 1.8).toFixed(2), fill: accent, stroke: ink, "stroke-width": sw.toFixed(2) });
 
   if (isFull) {
-    // Cross braces
-    penLineToGroup(group, [[w * 0.40, h * 0.16], [w * 0.60, h * 0.28]],
-      { tier: "structure", baseWidth: sw * 0.5, stroke: shade(PALETTE.night, 20), rng });
-    penLineToGroup(group, [[w * 0.60, h * 0.16], [w * 0.40, h * 0.28]],
-      { tier: "structure", baseWidth: sw * 0.5, stroke: shade(PALETTE.night, 20), rng });
-    // Light bulb indication
-    add(group, "circle", {
-      cx: (w * 0.50).toFixed(1), cy: (h * 0.34).toFixed(1),
-      r: (sw * 1.5).toFixed(2), fill: PALETTE.cream, opacity: "0.9", stroke: "none"
+    // === LAMP GLASS PANES ===
+    // Center pane
+    add(group, "rect", { x: (w * 0.44).toFixed(1), y: (h * 0.14).toFixed(1), width: (w * 0.12).toFixed(1), height: (h * 0.14).toFixed(1), fill: PALETTE.cream, opacity: "0.85", stroke: shade(color, 30), "stroke-width": (sw * 0.4).toFixed(2) });
+    // Side panes
+    add(group, "path", { d: `M${(w * 0.33).toFixed(1)} ${(h * 0.16).toFixed(1)} L${(w * 0.39).toFixed(1)} ${(h * 0.14).toFixed(1)} L${(w * 0.39).toFixed(1)} ${(h * 0.28).toFixed(1)} L${(w * 0.33).toFixed(1)} ${(h * 0.26).toFixed(1)} Z`, fill: PALETTE.cream, opacity: "0.60", stroke: shade(color, 30), "stroke-width": (sw * 0.4).toFixed(2) });
+    add(group, "path", { d: `M${(w * 0.61).toFixed(1)} ${(h * 0.14).toFixed(1)} L${(w * 0.67).toFixed(1)} ${(h * 0.16).toFixed(1)} L${(w * 0.67).toFixed(1)} ${(h * 0.26).toFixed(1)} L${(w * 0.61).toFixed(1)} ${(h * 0.28).toFixed(1)} Z`, fill: PALETTE.cream, opacity: "0.60", stroke: shade(color, 30), "stroke-width": (sw * 0.4).toFixed(2) });
+
+    // === LAMP BRACKET/ARM ===
+    penLineToGroup(group, [[w * 0.50, poleTop], [w * 0.50, h * 0.14]],
+      { tier: "structure", baseWidth: sw * 0.8, stroke: shade(color, 20), rng });
+    // Decorative scrolls on bracket
+    add(group, "path", {
+      d: `M${(w * 0.44).toFixed(1)} ${(h * 0.24).toFixed(1)} Q${(w * 0.40).toFixed(1)} ${(h * 0.20).toFixed(1)} ${(w * 0.42).toFixed(1)} ${(h * 0.18).toFixed(1)} M${(w * 0.56).toFixed(1)} ${(h * 0.24).toFixed(1)} Q${(w * 0.60).toFixed(1)} ${(h * 0.20).toFixed(1)} ${(w * 0.58).toFixed(1)} ${(h * 0.18).toFixed(1)}`,
+      fill: "none", stroke: accent, "stroke-width": (sw * 0.6).toFixed(2), "stroke-linecap": "round", "data-line-tier": "structure"
     });
-    // Pole texture
-    penLineToGroup(group, [[w * 0.50, h * 0.45], [w * 0.50, h * 0.55]],
-      { tier: "texture", baseWidth: sw * 0.3, stroke: shade(PALETTE.night, 30), rng });
-    penLineToGroup(group, [[w * 0.50, h * 0.65], [w * 0.50, h * 0.75]],
-      { tier: "texture", baseWidth: sw * 0.3, stroke: shade(PALETTE.night, 30), rng });
+
+    // === CROSS BRACES ===
+    penLineToGroup(group, [[w * 0.38, h * 0.18], [w * 0.62, h * 0.26]],
+      { tier: "structure", baseWidth: sw * 0.45, stroke: shade(color, 30), rng });
+    penLineToGroup(group, [[w * 0.62, h * 0.18], [w * 0.38, h * 0.26]],
+      { tier: "structure", baseWidth: sw * 0.45, stroke: shade(color, 30), rng });
+
+    // === POLE JOINT DETAILS ===
+    repeat(group, 3, i => {
+      const jy = h * (0.40 + i * 0.16);
+      penLineToGroup(group, [[w * 0.47, jy], [w * 0.53, jy]],
+        { tier: "texture", baseWidth: sw * 0.45, stroke: shade(color, 25), rng });
+      penLineToGroup(group, [[w * 0.47, jy + h * 0.01], [w * 0.53, jy + h * 0.01]],
+        { tier: "texture", baseWidth: sw * 0.45, stroke: shade(color, 25), rng });
+    });
+
+    // === POLE VERTICAL TEXTURE ===
+    penLineToGroup(group, [[w * 0.50, h * 0.35], [w * 0.50, h * 0.38]],
+      { tier: "texture", baseWidth: sw * 0.2, stroke: shade(color, 45), rng });
   }
 
   return group;
