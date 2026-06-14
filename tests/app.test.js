@@ -1224,3 +1224,33 @@ test("水墨纹理覆盖层不破坏语义主体可编辑性", async () => {
   app.engine.execute([{ type: "move", target: "人物", dx: 30, dy: 0 }]);
   assert.equal(app.engine.state.objects[0].x, 330);
 });
+
+test("语音左移会更新选中实体状态并立即重绘位置", async () => {
+  resetApp();
+  app.engine.execute([
+    { type: "entity_create", templateId: "person", name: "人物", x: 300, y: 200, width: 180, height: 360, params: {} }
+  ]);
+  app.render();
+  assert.match(browser.elements["drawing-layer"].children[0].getAttribute("transform"), /^translate\(300 200\)/);
+
+  await app.handleCommand("左移");
+
+  assert.equal(app.engine.state.objects[0].x, 250);
+  assert.match(browser.elements["drawing-layer"].children[0].getAttribute("transform"), /^translate\(250 200\)/);
+});
+
+test("场景生成后左移默认移动前景主体而不是全画布氛围实体", async () => {
+  resetApp();
+  await app.handleCommand("画一个下雨天打伞的女人");
+  const person = app.engine.state.objects.find(object => object.name === "人物");
+  const rain = app.engine.state.objects.find(object => object.name === "雨");
+  assert.deepEqual(app.engine.state.selection, [person.id]);
+
+  await app.handleCommand("左移");
+
+  assert.equal(person.x, 390);
+  assert.equal(app.engine.state.objects.find(object => object.name === "人物").x, 340);
+  assert.equal(app.engine.state.objects.find(object => object.name === "雨").x, rain.x);
+  const renderedPerson = browser.elements["drawing-layer"].children.find(child => child.getAttribute("data-name") === "人物");
+  assert.match(renderedPerson.getAttribute("transform"), /^translate\(340 265\)/);
+});

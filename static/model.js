@@ -683,6 +683,18 @@ export class DrawingEngine {
     try {
       const context = { lastCompositeId: null };
       mutations.forEach(action => applyAction(working, action, context));
+      const sceneCreates = mutations.filter(action => action.type === "entity_create");
+      if (mutations.some(action => action.type === "scene_update") && sceneCreates.length) {
+        const createdNames = new Set(sceneCreates.map(action => action.name));
+        const createdEntities = working.objects.filter(object => object.kind === "entity" && createdNames.has(object.name));
+        const focus = createdEntities.find(object => object.role === "主角")
+          || createdEntities.find(object => object.layer >= 0)
+          || createdEntities.at(-1);
+        if (focus) {
+          working.selection = [focus.id];
+          working.lastCreated = [focus.id];
+        }
+      }
     } catch (error) {
       throw error;
     }
