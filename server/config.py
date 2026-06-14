@@ -9,9 +9,11 @@ STATIC = ROOT / "static"
 CONFIG = {
     "speech_to_text": {"base_url": "", "model": ""},
     "command_model": {"base_url": "", "model": ""},
+    "texture_model": {"base_url": "", "model": ""},
 }
 CONFIG_SECTIONS = set(CONFIG)
 CONFIG_FIELDS = {"base_url", "model"}
+REQUIRED_CONFIG_SECTIONS = {"speech_to_text", "command_model"}
 
 
 def load_env_file(path=ROOT / ".env"):
@@ -64,10 +66,15 @@ def load_config_file(path=ROOT / "config.yaml"):
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
         loaded[section][key] = value
-    for name in CONFIG_SECTIONS:
+    for name in REQUIRED_CONFIG_SECTIONS:
         values = loaded.get(name, {})
         if set(values) != CONFIG_FIELDS:
             raise ValueError(f"config.yaml 缺少 {name} 配置")
+    for name in CONFIG_SECTIONS - REQUIRED_CONFIG_SECTIONS:
+        values = loaded.get(name, {"base_url": "", "model": ""})
+        if set(values) != CONFIG_FIELDS:
+            raise ValueError(f"config.yaml 缺少 {name} 配置")
+        loaded[name] = values
     CONFIG.clear()
     CONFIG.update(loaded)
     return CONFIG

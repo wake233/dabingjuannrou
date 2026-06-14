@@ -5,3 +5,8 @@ speech_to_text:
 command_model:
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   model: qwen-plus
+
+# 可选。配置 OpenAI 兼容的 /images/generations 接口后启用云端纹理。
+texture_model:
+  base_url: ""
+  model: ""

@@ -1,5 +1,7 @@
+import base64
 import json
 import os
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,7 +12,10 @@ import server.config
 import server.client
 from server.config import CONFIG, load_env_file, load_config_file
 from server.schema import MAX_AUDIO_BYTES, validate_actions, validate_interpretation
-from server.art import compose_drafts, generate_texture, refine_artwork, validate_texture_request
+from server.art import (
+    MAX_TEXTURE_BYTES, compose_drafts, generate_texture, refine_artwork,
+    validate_generated_png, validate_texture_request,
+)
 from server.client import (
     ServiceError, parse_json_content, parse_with_llm, parse_interpretation_content,
     transcribe_audio, service_status,
@@ -30,8 +35,10 @@ class Response:
     def __exit__(self, *_):
         return None
 
-    def read(self):
+    def read(self, *_):
         return json.dumps(self.body).encode()
+
+PNG_1X1_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 
 
 class ServerTests(unittest.TestCase):
@@ -46,13 +53,26 @@ class ServerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_actions([action])
 
-    def test_texture_request_is_constrained_and_returns_png_metadata(self):
+    def test_texture_request_is_constrained_and_cloud_response_returns_png_metadata(self):
         request = {"prompt": "soft paper", "style": "storybook", "textureType": "paper", "width": 1000, "height": 700}
         self.assertEqual(validate_texture_request(request), request)
-        result = generate_texture(request)
+        config = {"base_url": "https://texture.test/v1", "model": "texture-model"}
+        response = Response({"data": [{"b64_json": PNG_1X1_BASE64}]})
+        with patch.dict(os.environ, {"TEXTURE_API_KEY": "texture-key"}, clear=True), \
+                patch("server.art.CONFIG", {"texture_model": config}), \
+                patch("server.art.urlopen", return_value=response) as mocked:
+            result = generate_texture(request)
         self.assertEqual(result["mimeType"], "image/png")
-        self.assertTrue(result["imageBase64"])
+        self.assertEqual(result["imageBase64"], PNG_1X1_BASE64)
+        self.assertEqual(result["model"], "texture-model")
+        self.assertEqual((result["width"], result["height"]), (1, 1))
         self.assertTrue(result["cacheKey"].startswith("texture-"))
+        cloud_request = mocked.call_args.args[0]
+        payload = json.loads(cloud_request.data.decode("utf-8"))
+        self.assertEqual(cloud_request.full_url, "https://texture.test/v1/images/generations")
+        self.assertEqual(payload["response_format"], "b64_json")
+        self.assertNotIn("url", payload)
+        self.assertEqual(cloud_request.headers["Authorization"], "Bearer texture-key")
         for invalid in [
             {**request, "prompt": "https://evil.test/image.png"},
             {**request, "prompt": "<svg/>"},
@@ -62,6 +82,42 @@ class ServerTests(unittest.TestCase):
         ]:
             with self.assertRaises(ValueError):
                 validate_texture_request(invalid)
+
+    def test_texture_cloud_unconfigured_timeout_and_invalid_responses_are_explicit(self):
+        request = {"prompt": "soft paper", "style": "storybook", "textureType": "paper", "width": 1000, "height": 700}
+        with patch.dict(os.environ, {}, clear=True), patch("server.art.CONFIG", {"texture_model": {"base_url": "", "model": ""}}):
+            with self.assertRaises(ServiceError) as caught:
+                generate_texture(request)
+            self.assertEqual(caught.exception.error_code, "configuration_missing")
+
+        config = {"texture_model": {"base_url": "https://texture.test/v1", "model": "texture-model"}}
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "shared"}, clear=True), patch("server.art.CONFIG", config), \
+                patch("server.art.urlopen", side_effect=TimeoutError):
+            with self.assertRaises(ServiceError) as caught:
+                generate_texture(request)
+            self.assertEqual(caught.exception.error_code, "timeout")
+            self.assertTrue(caught.exception.retryable)
+
+        invalid_responses = [
+            {"data": [{"url": "https://evil.test/texture.png"}]},
+            {"data": [{"b64_json": "not-base64"}]},
+            {"data": [{"b64_json": base64.b64encode(b"<svg/>").decode("ascii")}]},
+            {"data": [{"b64_json": base64.b64encode(
+                b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", 4096, 1)
+            ).decode("ascii")}]},
+        ]
+        for response_body in invalid_responses:
+            with self.subTest(response=response_body), patch.dict(os.environ, {"OPENAI_API_KEY": "shared"}, clear=True), \
+                    patch("server.art.CONFIG", config), patch("server.art.urlopen", return_value=Response(response_body)):
+                with self.assertRaises(ServiceError) as caught:
+                    generate_texture(request)
+                self.assertEqual(caught.exception.error_code, "invalid_response")
+
+        oversized = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", 1, 1)
+        oversized += b"x" * (MAX_TEXTURE_BYTES - len(oversized) + 1)
+        with self.assertRaises(ServiceError) as caught:
+            validate_generated_png(base64.b64encode(oversized).decode("ascii"))
+        self.assertEqual(caught.exception.error_code, "invalid_response")
 
     def test_texture_action_validation(self):
         action = {"type": "texture", "operation": "apply", "prompt": "paper", "model": "safe",
@@ -105,12 +161,14 @@ class ServerTests(unittest.TestCase):
                 "cloudTranscriptionConfigured": True,
                 "cloudTranscriptionIssue": None,
                 "commandModelConfigured": True,
+                "textureModelConfigured": False,
             })
         with patch.object(server.client, "CONFIG", config), patch.dict(os.environ, {}, clear=True):
             self.assertEqual(service_status(), {
                 "cloudTranscriptionConfigured": False,
                 "cloudTranscriptionIssue": "missing_api_key",
                 "commandModelConfigured": False,
+                "textureModelConfigured": False,
             })
 
     def test_load_env_file_without_overriding_process_environment(self):
@@ -133,7 +191,10 @@ class ServerTests(unittest.TestCase):
                 "  model: speech-model\n"
                 "command_model:\n"
                 "  base_url: https://command.test/v1\n"
-                "  model: command-model\n",
+                "  model: command-model\n"
+                "texture_model:\n"
+                "  base_url: https://texture.test/v1\n"
+                "  model: texture-model\n",
                 encoding="utf-8",
             )
             with patch.object(server.config, "CONFIG", {
@@ -143,6 +204,7 @@ class ServerTests(unittest.TestCase):
                 config = load_config_file(path)
                 self.assertEqual(config["speech_to_text"]["model"], "speech-model")
                 self.assertEqual(config["command_model"]["base_url"], "https://command.test/v1")
+                self.assertEqual(config["texture_model"]["model"], "texture-model")
 
     def test_invalid_yaml_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -158,6 +220,16 @@ class ServerTests(unittest.TestCase):
         }):
             with self.assertRaisesRegex(RuntimeError, "未配置"):
                 parse_with_llm("画圆", {})
+
+    def test_service_status_reports_independent_texture_configuration(self):
+        config = {
+            "speech_to_text": {"base_url": "", "model": ""},
+            "command_model": {"base_url": "", "model": ""},
+            "texture_model": {"base_url": "https://texture.test/v1", "model": "texture-model"},
+        }
+        with patch.dict(os.environ, {"TEXTURE_API_KEY": "texture-key"}, clear=True), \
+                patch.object(server.client, "CONFIG", config):
+            self.assertTrue(service_status()["textureModelConfigured"])
 
     def test_valid_model_response(self):
         response = Response({"choices": [{"message": {"content": '[{"type":"create","kind":"circle"}]'}}]})

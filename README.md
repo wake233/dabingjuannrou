@@ -18,6 +18,8 @@
 
 绘本、木刻和水墨共享可编辑语义实体，但使用独立渲染规则：绘本强调层叠叙事，木刻使用高反差块面与方向性刻线，水墨使用浓淡、留白与飞白。选稿后会请求受约束 PNG 纹理；纹理缓存缺失或生成失败时自动回退到完整矢量版本，不影响编辑、撤销、恢复和导出。
 
+云端纹理是可选能力。启用时，在 `config.yaml` 的 `texture_model` 中配置支持 `/images/generations` 和 `b64_json` 的 OpenAI 兼容接口，并在 `.env` 中设置 `TEXTURE_API_KEY`；未单独设置时会回退使用 `OPENAI_API_KEY`。服务只接受内联 PNG，拒绝外部 URL、SVG、超过 2048 像素或 5MB 的响应。未配置或请求失败时，作品继续使用无纹理矢量版本。
+
 ## 启动
 
 要求 Python 3.8+。云端语音识别需要浏览器支持 `MediaRecorder`、`AudioContext`。
@@ -56,7 +58,7 @@ python main.py --no-browser
 python main.py
 ```
 
-服务启动时自动读取项目根目录的 `.env` 和 `config.yaml`。`.env` 只保存 `OPENAI_API_KEY` 且已被 Git 忽略，可提交的密钥模板为 `.env.example`；服务地址和模型名均写在可提交的 `config.yaml` 中。音频只转发到配置的转写服务，不会保存到本地磁盘。
+服务启动时自动读取项目根目录的 `.env` 和 `config.yaml`。`.env` 保存 `OPENAI_API_KEY`，并可选保存独立的 `TEXTURE_API_KEY`；该文件已被 Git 忽略，可提交的密钥模板为 `.env.example`。服务地址和模型名均写在可提交的 `config.yaml` 中。音频只转发到配置的转写服务，不会保存到本地磁盘。
 
 当前示例配置使用阿里云百炼兼容接口：语音转写模型为 `qwen3-asr-flash`，命令模型为 `qwen-plus`。实时 WebSocket 模型（名称通常包含 `realtime`）不能用于当前短音频转写请求。
 

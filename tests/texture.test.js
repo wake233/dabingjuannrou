@@ -5,7 +5,7 @@ import { clearMemoryTextureCache, loadTexture, removeTexture, saveTexture } from
 
 test("纹理元数据作为受约束动作保存、撤销、移除并恢复", () => {
   const engine = new DrawingEngine();
-  const apply = { type: "texture", operation: "apply", prompt: "soft paper", model: "procedural",
+  const apply = { type: "texture", operation: "apply", prompt: "soft paper", model: "cloud-texture",
     cacheKey: "texture-safe", mimeType: "image/png", width: 1000, height: 700 };
   engine.execute([apply]);
   assert.equal(engine.state.art.texture.status, "ready");

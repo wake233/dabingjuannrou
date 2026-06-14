@@ -227,4 +227,9 @@ def service_status():
             and CONFIG["command_model"]["model"]
             and api_key_configured
         ),
+        "textureModelConfigured": bool(
+            CONFIG.get("texture_model", {}).get("base_url")
+            and CONFIG.get("texture_model", {}).get("model")
+            and (os.environ.get("TEXTURE_API_KEY", "").strip() or api_key_configured)
+        ),
     }

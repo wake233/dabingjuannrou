@@ -1,16 +1,24 @@
-"""Constrained artistic planning and procedural texture services."""
+"""Constrained artistic planning and cloud texture services."""
 
 import base64
 import hashlib
+import json
+import os
+import struct
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from server.client import ServiceError, service_error
+from server.config import CONFIG
 
 ALLOWED_STYLES = {"storybook", "woodcut", "ink"}
 ALLOWED_TEXTURE_TYPES = {"paper", "carved", "ink-wash"}
 MAX_TEXTURE_SIZE = 2048
 MAX_TEXTURE_PROMPT = 500
-
-# A safe, local 1x1 PNG placeholder. The browser scales and blends it while the
-# structured vector artwork remains fully available and editable.
-PNG_1X1 = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+MAX_TEXTURE_BYTES = 5 * 1024 * 1024
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_END = b"\x00\x00\x00\x00IEND\xaeB`\x82"
+MAX_TEXTURE_RESPONSE_BYTES = MAX_TEXTURE_BYTES * 2 + 4096
 
 DRAFT_STRATEGIES = {
     "storybook": [("left-third", "diagonal-rise", "hero-large", "right-open"), ("center-low", "s-curve", "environment-large", "top-open"), ("right-third", "horizontal-calm", "hero-distant", "left-open")],
@@ -40,16 +48,70 @@ def validate_texture_request(body):
     return {"prompt": prompt.strip(), "style": style, "textureType": texture_type, "width": width, "height": height}
 
 
-def generate_texture(body):
+def validate_generated_png(encoded):
+    if not isinstance(encoded, str) or not encoded or len(encoded) > MAX_TEXTURE_BYTES * 2:
+        raise ServiceError("云端纹理响应无效", "invalid_response", False, 502)
+    try:
+        image = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ServiceError("云端纹理不是有效 PNG", "invalid_response", False, 502) from exc
+    if len(image) > MAX_TEXTURE_BYTES:
+        raise ServiceError("云端纹理文件过大", "invalid_response", False, 502)
+    if (len(image) < 36 or not image.startswith(PNG_SIGNATURE)
+            or image[12:16] != b"IHDR" or not image.endswith(PNG_END)):
+        raise ServiceError("云端纹理不是有效 PNG", "invalid_response", False, 502)
+    width, height = struct.unpack(">II", image[16:24])
+    if not 1 <= width <= MAX_TEXTURE_SIZE or not 1 <= height <= MAX_TEXTURE_SIZE:
+        raise ServiceError("云端纹理尺寸超限", "invalid_response", False, 502)
+    return image, width, height
+
+
+def generate_texture(body, timeout=45):
     request = validate_texture_request(body)
-    digest = hashlib.sha256(repr(sorted(request.items())).encode("utf-8")).hexdigest()
+    config = CONFIG.get("texture_model", {})
+    base_url = config.get("base_url", "").rstrip("/")
+    model = config.get("model", "")
+    api_key = os.environ.get("TEXTURE_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
+    if not (base_url and model and api_key):
+        raise ServiceError("云端纹理未配置，继续使用无纹理矢量版本", "configuration_missing", False, 503)
+    prompt = (
+        f"Seamless {request['style']} {request['textureType']} texture only. "
+        f"No text, no objects, no scene, no SVG. {request['prompt']}"
+    )
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "size": f"{request['width']}x{request['height']}",
+        "response_format": "b64_json",
+        "n": 1,
+    }
+    cloud_request = Request(
+        f"{base_url}/images/generations",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    try:
+        with urlopen(cloud_request, timeout=timeout) as response:
+            raw_response = response.read(MAX_TEXTURE_RESPONSE_BYTES + 1)
+            if len(raw_response) > MAX_TEXTURE_RESPONSE_BYTES:
+                raise ServiceError("云端纹理响应过大", "invalid_response", False, 502)
+            result = json.loads(raw_response.decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise service_error("云端纹理", exc) from exc
+    try:
+        encoded = result["data"][0]["b64_json"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ServiceError("云端纹理响应结构无效", "invalid_response", False, 502) from exc
+    _, width, height = validate_generated_png(encoded)
+    digest = hashlib.sha256((model + prompt + encoded).encode("utf-8")).hexdigest()
     return {
         "mimeType": "image/png",
-        "imageBase64": base64.b64encode(PNG_1X1).decode("ascii"),
-        "width": request["width"],
-        "height": request["height"],
+        "imageBase64": encoded,
+        "width": width,
+        "height": height,
         "cacheKey": f"texture-{digest[:24]}",
-        "model": "listen-paint-procedural-texture-v1",
+        "model": model,
         "prompt": request["prompt"],
     }
 

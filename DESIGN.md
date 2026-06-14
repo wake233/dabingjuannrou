@@ -53,7 +53,7 @@
 | `static/parser.js` | 中文数字、模糊纠错、文本归一化、分句、本地规则、复合图形拆解 | 输出标准动作，并调用浏览器侧动作校验 |
 | `static/scene_schema.js` / `templates.js` | 语义实体白名单、受控参数与参数化绘本 SVG 模板 | 模型不能提供原始 SVG；实体整体选择 |
 | `static/art_schema.js` / `renderers.js` | 版本 3 创作状态、三稿策略、审美精修、锁定与三风格独立渲染 | 三风格共享语义实体，不共享造型规则 |
-| `static/texture_cache.js` / `server/art.py` | IndexedDB 纹理缓存与受约束构图、精修、PNG 纹理接口 | 拒绝外部 URL、SVG、超限尺寸和任意属性 |
+| `static/texture_cache.js` / `server/art.py` | IndexedDB 纹理缓存与受约束构图、精修、OpenAI 兼容 PNG 纹理接口 | 拒绝外部 URL、SVG、超限尺寸和任意属性；失败保留矢量版本 |
 | `static/app.js` | 云端语音状态机、VAD、预览与正式渲染、TTS、导出、模型回退、只读验收事件 | 浏览器编排层，依赖 DOM 和浏览器媒体 API |
 | `static/acceptance.js` | `?acceptance=1` 引导式验收台、浏览器本地记录与报告导出 | 仅在验收模式动态加载，不保存音频 |
 | `static/vosk_recognizer.js` | IndexedDB 模型缓存接口、离线识别器生命周期和 mock 注入 | 真实 Vosk WASM 初始化仍是桩代码 |
@@ -222,9 +222,9 @@ art           创作意图、构图、艺术指导、锁定、小稿、阶段与
 
 配置策略：
 
-- 应用只使用 `.env` 中的 `OPENAI_API_KEY`；加载器不会覆盖已有进程环境变量。
-- `config.yaml` 保存 STT 和命令模型的 `base_url` 与 `model`。
-- 两种外部服务共享同一个 `OPENAI_API_KEY`。
+- 应用使用 `.env` 中的 `OPENAI_API_KEY`，纹理服务可选使用独立的 `TEXTURE_API_KEY`；加载器不会覆盖已有进程环境变量。
+- `config.yaml` 保存 STT、命令模型和可选纹理模型的 `base_url` 与 `model`。
+- 纹理服务调用 OpenAI 兼容 `/images/generations` 接口，只请求 `b64_json`；没有独立纹理密钥时共享 `OPENAI_API_KEY`。
 - 音频只在内存中转发，不写入本地磁盘。
 
 安全策略：
@@ -232,6 +232,7 @@ art           创作意图、构图、艺术指导、锁定、小稿、阶段与
 - 模型动作在服务端和浏览器端分别校验。
 - 动作类型、字段、枚举、数值范围、目标长度和颜色格式均使用白名单。
 - 不支持代码执行、任意对象属性写入或任意 SVG 属性。
+- 云端纹理响应必须是内联 PNG，且不超过 2048 像素和 5MB；外部 URL、SVG 或无效响应会显式失败并回退到可编辑矢量版本。
 - 服务默认仅绑定 `127.0.0.1`。若使用 `--host 0.0.0.0` 暴露到网络，当前服务没有身份认证、速率限制或跨站请求防护，不适合作为公开服务。
 
 ## 6. 测试与验证
