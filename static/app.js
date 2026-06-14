@@ -2,6 +2,9 @@ import { DrawingEngine, validateActions } from "./model.js";
 import { parseCommand } from "./parser.js";
 import { renderArtworkEntity } from "./renderers.js";
 import { loadTexture, removeTexture, saveTexture } from "./texture_cache.js";
+import { executeArtPipeline } from "./art_engine_core.js";
+import { getMaterialProfile, materialBackdropStyle } from "./material.js";
+import { getLightingProfile, getEnvironmentColor } from "./lighting.js";
 
 export const engine = new DrawingEngine();
 const $ = id => document.getElementById(id);
@@ -122,7 +125,94 @@ export function svgElement(o, renderOptions = {}) {
   return el;
 }
 
+/**
+ * Enrich entity objects with art engine metadata for rendering.
+ * Adds _grammarCategory, _structureRules, _lightingColors, _shadowOffset,
+ * _materialRoughness, _materialEdgeStyle, _blockType, _blockOpacity.
+ * Does NOT modify entity positions — art director is called separately.
+ */
+function applyArtEngineToEntities(objects, renderOptions = {}) {
+  const entities = objects.filter(o => o.kind === "entity");
+  if (!entities.length) return;
+
+  const art = engine.state.art;
+  const renderProfile = art.renderProfile || {};
+  const style = art.artDirection.style || "storybook";
+  const lighting = getLightingProfile(renderProfile.lighting || "soft-day");
+  const material = getMaterialProfile(renderProfile.material || "paper");
+
+  // Import needed functions (available at module scope)
+  const { getGrammarCategory } = globalThis._artGrammar || {};
+  const { getLightingColors, computeShadowOffset } = globalThis._artLighting || {};
+  // Use inline imports if not available at module scope
+  const grammar = typeof getGrammarCategory === "function" ? getGrammarCategory
+    : (id => ({ person: "figure", cat: "figure", dog: "figure", bird: "figure",
+      house: "structure", roof: "structure", bridge: "structure", boat: "structure",
+      bench: "structure", bicycle: "structure", fence: "structure", buildings: "structure",
+      streetlamp: "structure", umbrella: "structure", street: "structure",
+      tree: "nature", mountain: "nature", flowers: "nature", grass: "nature",
+      river: "nature", puddle: "nature",
+      rain: "atmosphere", cloud: "atmosphere", sun: "atmosphere", moon: "atmosphere", stars: "atmosphere"
+    }[id] || "structure"));
+
+  for (const entity of entities) {
+    // Grammar classification
+    const cat = grammar(entity.templateId);
+    entity._grammarCategory = cat;
+    entity._structureRules = {
+      figure: { hasSkeleton: true, hasJoints: true },
+      structure: { hasPerspective: true, hasJoints: true },
+      nature: { hasGrowth: true },
+      atmosphere: { hasDirection: true }
+    }[cat] || {};
+
+    // Lighting metadata
+    const baseColor = entity.params?.color || "#617f96";
+    entity._lightingColors = (typeof getLightingColors === "function")
+      ? getLightingColors(baseColor, lighting)
+      : { highlight: baseColor, shadow: "#303946", ambient: baseColor };
+    entity._shadowOffset = (typeof computeShadowOffset === "function")
+      ? computeShadowOffset(entity, lighting)
+      : { dx: 2, dy: 4 };
+
+    // Material metadata
+    entity._materialRoughness = material.roughness;
+    entity._materialEdgeStyle = material.edgeStyle;
+
+    // Block type assignment based on style
+    if (style === "woodcut") {
+      entity._blockType = "high-contrast";
+      entity._carveDirection = cat === "nature" ? "diagonal" : "horizontal";
+    } else if (style === "ink") {
+      entity._blockType = "ink-wash-gradient";
+      entity._flyingWhite = cat === "nature";
+    } else {
+      entity._blockType = cat === "figure" ? "layered-gradient"
+        : cat === "structure" ? "solid-gradient"
+        : cat === "nature" ? "variegated-gradient"
+        : "diffuse-gradient";
+      entity._blockOpacity = cat === "atmosphere" ? 0.4 : 1.0;
+    }
+  }
+
+  // Apply material backdrop to canvas if in browser context
+  if (typeof document !== "undefined" && renderProfile.material && renderProfile.material !== "smooth") {
+    if (material.filterType !== "none") {
+      try {
+        const canvasEl = document.getElementById("drawing-layer");
+        if (canvasEl && typeof canvasEl.hasAttribute === "function" && !canvasEl.hasAttribute("data-material-applied")) {
+          canvasEl.style?.setProperty?.("--material-backdrop", materialBackdropStyle(renderProfile.material));
+          canvasEl.setAttribute?.("data-material-applied", renderProfile.material);
+        }
+      } catch (_) { /* DOM mock may not support these operations */ }
+    }
+  }
+}
+
 function renderObjects(layerElement, objects, selection = [], textureDataUrl = "", renderOptions = {}) {
+  // Apply art engine pipeline to entities for lighting/material metadata
+  applyArtEngineToEntities(objects, renderOptions);
+
   const selectionSet = new Set(selection);
   const rendered = objects.map(o => {
     const el = svgElement(o, renderOptions);
