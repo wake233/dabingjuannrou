@@ -406,6 +406,15 @@ test("常见语义实体修改由本地规则确定性解析", () => {
   assert.equal(parseCommand("保存项目")[0].format, "project");
 });
 
+test("选中实体方向移动不会被误判为选择命令", () => {
+  assert.deepEqual(parseCommand("选中实体左移"), [{
+    type: "move", target: "selected", dx: -50, dy: 0
+  }]);
+  assert.deepEqual(parseCommand("把选中的实体右移二十"), [{
+    type: "move", target: "selected", dx: 20, dy: 0
+  }]);
+});
+
 test("扩展常见场景实体可被后续语音修改", () => {
   assert.deepEqual(parseCommand("把自行车改成红色"), [{
     type: "entity_update", target: "自行车", changes: { params: { color: "#ef4444" } }

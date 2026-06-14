@@ -516,6 +516,15 @@ test("现有选择、缩放、旋转、置顶和删除动作支持语义实体",
   assert.deepEqual(engine.state.objects.map(object => object.name), ["月亮"]);
 });
 
+test("选中的语义实体可通过左移指令移动", () => {
+  const engine = new DrawingEngine();
+  engine.execute([
+    { type: "entity_create", templateId: "moon", name: "月亮", x: 100, y: 50, width: 100, height: 100 }
+  ]);
+  engine.execute(parseCommand("选中实体左移"));
+  assert.equal(engine.state.objects[0].x, 50);
+});
+
 test("单个场景规划允许最多 20 个实体但拒绝普通 21 动作", () => {
   const sceneActions = [
     { type: "scene_update", changes: { summary: "星空" } },

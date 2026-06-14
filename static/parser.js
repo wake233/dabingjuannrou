@@ -314,7 +314,8 @@ function parseClause(clause, context) {
     return [action];
   }
 
-  if (/选中|选择/.test(clause)) {
+  const hasOperation = /取消组合|解散组合|组合|编组|复制|克隆|删除|移除|置顶|置底|移动|放到|放在|移到|左移|右移|上移|下移|向左|往左|向右|往右|向上|往上|向下|往下|对齐|分布|改成|变成|填充|描边|边框|轮廓|线宽|旋转|透明度|放大|缩小/.test(clause);
+  if (/选中|选择/.test(clause) && !hasOperation) {
     const action = { type: "select", target: targetFrom(clause, context) };
     context.selected = true;
     return [action];
@@ -333,10 +334,10 @@ function parseClause(clause, context) {
   }
   const distanceText = clause.replace(/一点/g, "");
   const distance = chineseNumber(distanceText.match(/([零一二两三四五六七八九十百\d.]+)(?:个像素|像素)?/)?.[1]) || 50;
-  if (/向左|往左/.test(clause)) return [{ type: "move", target, dx: -distance, dy: 0 }];
-  if (/向右|往右/.test(clause)) return [{ type: "move", target, dx: distance, dy: 0 }];
-  if (/向上|往上/.test(clause)) return [{ type: "move", target, dx: 0, dy: -distance }];
-  if (/向下|往下/.test(clause)) return [{ type: "move", target, dx: 0, dy: distance }];
+  if (/向左|往左|左移/.test(clause)) return [{ type: "move", target, dx: -distance, dy: 0 }];
+  if (/向右|往右|右移/.test(clause)) return [{ type: "move", target, dx: distance, dy: 0 }];
+  if (/向上|往上|上移/.test(clause)) return [{ type: "move", target, dx: 0, dy: -distance }];
+  if (/向下|往下|下移/.test(clause)) return [{ type: "move", target, dx: 0, dy: distance }];
 
   const alignments = [
     ["顶部对齐", "top"], ["底部对齐", "bottom"], ["左对齐", "left"], ["右对齐", "right"],
