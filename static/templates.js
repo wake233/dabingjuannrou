@@ -68,7 +68,7 @@ function shade(hex, amount) {
   // Scale small amounts to produce visible colour shifts across the palette.
   const effective = Math.sign(amount) * Math.max(Math.abs(amount), Math.abs(amount) < 15 ? Math.abs(amount) * 1.6 : Math.abs(amount));
   const v = Number.parseInt(hex.slice(1), 16);
-  const c = (ch) => Math.max(0, Math.min(255, ch + effective));
+  const c = (ch) => Math.round(Math.max(0, Math.min(255, ch + effective)));
   return `#${[v >> 16, (v >> 8) & 255, v & 255].map(ch => c(ch).toString(16).padStart(2, "0")).join("")}`;
 }
 
@@ -241,56 +241,69 @@ function renderPerson(entity, quality, namespace) {
   const sw = Math.max(1.8, Math.min(w, h) * 0.016);
   const isWoman = variant === "woman";
   const isWalking = pose === "walking";
-  const volumeLimb = (points, limbColor, seed, size) => {
-    if (isFull) {
-      return adapterFreehand(group, organicCurve(points), {
-        size, fill: limbColor, seed, tier: "anatomy"
+  const addLimbChain = (part, points, limbColor, width) => {
+    points.slice(0, -1).forEach((start, index) => {
+      const end = points[index + 1];
+      add(group, "path", {
+        d: `M${start[0].toFixed(1)} ${start[1].toFixed(1)} L${end[0].toFixed(1)} ${end[1].toFixed(1)}`,
+        fill: "none",
+        stroke: limbColor,
+        "stroke-width": width.toFixed(2),
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        "data-anatomy": "limb-segment",
+        "data-limb": part,
+        "data-segment": String(index)
       });
-    }
-    const d = points.length === 3
-      ? `M${points[0][0]} ${points[0][1]} Q${points[1][0]} ${points[1][1]} ${points[2][0]} ${points[2][1]}`
-      : `M${points.map(point => `${point[0]} ${point[1]}`).join(" L")}`;
-    return add(group, "path", {
-      d, fill: "none", stroke: limbColor, "stroke-width": size,
-      "stroke-linecap": "round", "stroke-linejoin": "round", "data-anatomy": "volume-limb"
+    });
+    points.slice(1, -1).forEach((joint, index) => {
+      add(group, "circle", {
+        cx: joint[0].toFixed(1),
+        cy: joint[1].toFixed(1),
+        r: (width * 0.51).toFixed(2),
+        fill: limbColor,
+        stroke: "none",
+        "data-joint": part.includes("arm") ? "elbow" : "knee",
+        "data-limb": part,
+        "data-joint-index": String(index)
+      });
     });
   };
 
   // Ground shadow
   shadowEllipse(group, w * 0.50, h * 0.965, w * 0.32, h * 0.025, PALETTE.night, 0.20);
 
-  // === FEET & SHOES ===
+  // === LEGS, KNEES & FEET ===
   const lfx = isWalking ? w * 0.30 : w * 0.36;
   const rfx = isWalking ? w * 0.72 : w * 0.60;
   const footY = h * 0.95;
-  // Left foot - more organic shape
-  penLineToGroup(group, [
-    [lfx - w * 0.05, footY], [lfx - w * 0.03, footY - h * 0.02],
-    [lfx - w * 0.01, footY - h * 0.025], [lfx + w * 0.02, footY - h * 0.022],
-    [lfx + w * 0.06, footY - h * 0.015], [lfx + w * 0.09, footY],
-    [lfx + w * 0.07, footY + h * 0.008]
-  ], { tier: "outline", baseWidth: sw * 1.4, stroke: PALETTE.deepInk, rng });
-  // Right foot
-  penLineToGroup(group, [
-    [rfx - w * 0.05, footY], [rfx - w * 0.03, footY - h * 0.02],
-    [rfx - w * 0.01, footY - h * 0.025], [rfx + w * 0.02, footY - h * 0.022],
-    [rfx + w * 0.06, footY - h * 0.015], [rfx + w * 0.09, footY],
-    [rfx + w * 0.07, footY + h * 0.008]
-  ], { tier: "outline", baseWidth: sw * 1.4, stroke: PALETTE.deepInk, rng });
-
-  // === LEGS ===
-  const hipY = h * 0.50;
+  const hipY = h * 0.59;
   const kneeY = h * 0.72;
   const lLegPts = isWalking
-    ? [[w * 0.38, hipY], [w * 0.34, kneeY], [w * 0.30, h * 0.84], [lfx, footY - h * 0.01]]
-    : [[w * 0.40, hipY], [w * 0.38, kneeY], [w * 0.37, h * 0.84], [lfx, footY - h * 0.01]];
+    ? [[w * 0.43, hipY], [w * 0.35, kneeY], [lfx, footY - h * 0.025]]
+    : [[w * 0.43, hipY], [w * 0.40, kneeY], [lfx, footY - h * 0.025]];
   const rLegPts = isWalking
-    ? [[w * 0.62, hipY], [w * 0.66, kneeY], [w * 0.70, h * 0.84], [rfx, footY - h * 0.01]]
-    : [[w * 0.60, hipY], [w * 0.62, kneeY], [w * 0.63, h * 0.84], [rfx, footY - h * 0.01]];
-  volumeLimb(lLegPts, shade(color, -22), `${entity.id}-left-leg`, w * 0.085);
-  volumeLimb(rLegPts, shade(color, -28), `${entity.id}-right-leg`, w * 0.085);
-  add(group, "ellipse", { cx: lLegPts[1][0], cy: lLegPts[1][1], rx: w * 0.045, ry: w * 0.04, fill: shade(color, -18), "data-joint": "knee" });
-  add(group, "ellipse", { cx: rLegPts[1][0], cy: rLegPts[1][1], rx: w * 0.045, ry: w * 0.04, fill: shade(color, -24), "data-joint": "knee" });
+    ? [[w * 0.57, hipY], [w * 0.64, kneeY], [rfx, footY - h * 0.025]]
+    : [[w * 0.57, hipY], [w * 0.60, kneeY], [rfx, footY - h * 0.025]];
+  const legColor = shade(color, -20);
+  const legWidth = w * 0.078;
+  addLimbChain("left-leg", lLegPts, legColor, legWidth);
+  addLimbChain("right-leg", rLegPts, legColor, legWidth);
+  [
+    ["left-foot", lfx, lLegPts.at(-1)[1]],
+    ["right-foot", rfx, rLegPts.at(-1)[1]]
+  ].forEach(([part, footX, ankleY]) => {
+    add(group, "ellipse", {
+      cx: (footX + w * 0.025).toFixed(1),
+      cy: ankleY.toFixed(1),
+      rx: (w * 0.075).toFixed(1),
+      ry: (w * 0.035).toFixed(1),
+      fill: PALETTE.deepInk,
+      stroke: "none",
+      "data-anatomy": "foot",
+      "data-limb": part
+    });
+  });
 
   // === BODY / TORSO ===
   const shoulderY = h * 0.30;
@@ -339,23 +352,25 @@ function renderPerson(entity, quality, namespace) {
   const rHndX = armRelaxed ? w * 0.86 : w * 0.80, rHndY = armRelaxed ? h * 0.60 : h * 0.54;
   const leftArm = [[lShX, shY], [lElbX, lElbY], [lHndX, lHndY]];
   const rightArm = [[rShX, shY], [rElbX, rElbY], [rHndX, rHndY]];
-  volumeLimb(leftArm, shade(color, -12), `${entity.id}-left-arm`, w * 0.072);
-  volumeLimb(rightArm, shade(color, -18), `${entity.id}-right-arm`, w * 0.072);
-  add(group, "ellipse", { cx: lElbX, cy: lElbY, rx: w * 0.038, ry: w * 0.035, fill: shade(color, -10), "data-joint": "elbow" });
-  add(group, "ellipse", { cx: rElbX, cy: rElbY, rx: w * 0.038, ry: w * 0.035, fill: shade(color, -16), "data-joint": "elbow" });
-  // Hands (visible at base quality for recognition)
-  penLineToGroup(group, [[lHndX - w * 0.02, lHndY - h * 0.01], [lHndX + w * 0.02, lHndY + h * 0.01]],
-    { tier: "structure", baseWidth: sw * 0.5, stroke: PALETTE.skin, rng });
-  penLineToGroup(group, [[rHndX - w * 0.02, rHndY - h * 0.01], [rHndX + w * 0.02, rHndY + h * 0.01]],
-    { tier: "structure", baseWidth: sw * 0.5, stroke: PALETTE.skin, rng });
-
-  if (isFull) {
-    // Elbow joint lines
-    penLineToGroup(group, [[lElbX - w * 0.015, lElbY - h * 0.015], [lElbX + w * 0.015, lElbY + h * 0.01]],
-      { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.deepInk, rng });
-    penLineToGroup(group, [[rElbX + w * 0.015, rElbY - h * 0.015], [rElbX - w * 0.015, rElbY + h * 0.01]],
-      { tier: "structure", baseWidth: sw * 0.4, stroke: PALETTE.deepInk, rng });
-  }
+  const armColor = shade(color, -12);
+  const armWidth = w * 0.068;
+  addLimbChain("left-arm", leftArm, armColor, armWidth);
+  addLimbChain("right-arm", rightArm, armColor, armWidth);
+  [
+    ["left-hand", lHndX, lHndY],
+    ["right-hand", rHndX, rHndY]
+  ].forEach(([part, handX, handY]) => {
+    add(group, "ellipse", {
+      cx: handX.toFixed(1),
+      cy: handY.toFixed(1),
+      rx: (w * 0.035).toFixed(1),
+      ry: (w * 0.045).toFixed(1),
+      fill: PALETTE.skin,
+      stroke: "none",
+      "data-anatomy": "hand",
+      "data-limb": part
+    });
+  });
 
   // === HEAD ===
   const headCx = w * 0.50, headCy = h * 0.19, headRx = w * 0.105, headRy = h * 0.11;
@@ -426,17 +441,18 @@ function renderPerson(entity, quality, namespace) {
   if (isWoman) {
     const skTop = h * 0.50;
     add(group, "path", {
-      d: `M${(w * 0.30).toFixed(1)} ${skTop.toFixed(1)} L${(w * 0.22).toFixed(1)} ${(h * 0.78).toFixed(1)} Q${(w * 0.16).toFixed(1)} ${(h * 0.86).toFixed(1)} ${(w * 0.50).toFixed(1)} ${(h * 0.90).toFixed(1)} Q${(w * 0.84).toFixed(1)} ${(h * 0.86).toFixed(1)} ${(w * 0.78).toFixed(1)} ${(h * 0.78).toFixed(1)} L${(w * 0.70).toFixed(1)} ${skTop.toFixed(1)} Z`,
-      fill: shade(color, 12), stroke: ink, "stroke-width": sw.toFixed(2)
+      d: `M${(w * 0.32).toFixed(1)} ${skTop.toFixed(1)} L${(w * 0.27).toFixed(1)} ${(h * 0.67).toFixed(1)} Q${(w * 0.50).toFixed(1)} ${(h * 0.72).toFixed(1)} ${(w * 0.73).toFixed(1)} ${(h * 0.67).toFixed(1)} L${(w * 0.68).toFixed(1)} ${skTop.toFixed(1)} Z`,
+      fill: shade(color, 12), stroke: ink, "stroke-width": sw.toFixed(2),
+      "data-anatomy": "lower-garment"
     });
     if (isFull) {
       // Skirt pleat lines
-      repeat(group, 7, i => {
-        penLineToGroup(group, [[w * (0.23 + i * 0.08), skTop], [w * (0.20 + i * 0.08), h * 0.84]],
+      repeat(group, 5, i => {
+        penLineToGroup(group, [[w * (0.34 + i * 0.08), skTop], [w * (0.30 + i * 0.10), h * 0.68]],
           { tier: "texture", baseWidth: sw * 0.28, stroke: shade(color, -8), rng });
       });
       // Skirt hem
-      penLineToGroup(group, [[w * 0.17, h * 0.85], [w * 0.50, h * 0.89], [w * 0.83, h * 0.85]],
+      penLineToGroup(group, [[w * 0.27, h * 0.67], [w * 0.50, h * 0.71], [w * 0.73, h * 0.67]],
         { tier: "structure", baseWidth: sw * 0.5, stroke: shade(color, -15), rng });
     }
   }
