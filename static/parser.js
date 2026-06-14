@@ -126,7 +126,11 @@ export function normalizeText(text) {
 
 export function splitCommands(text, alreadyNormalized = false) {
   const normalized = alreadyNormalized ? text : normalizeText(text);
-  return normalized.split(/\s*(?:然后|并且|接着|随后|再(?=画|创建|选|把|将|向|往|顶部|底部|左|右|水平|垂直|保存|复制|删除|置|组合|取消组合))\s*/).filter(Boolean);
+  const joinedMovementDistance = normalized.replace(
+    /((?:向左|往左|左移|向右|往右|右移|向上|往上|上移|向下|往下|下移)(?:移动)?)\s+然后\s+([零一二两三四五六七八九十百千\d.]+)(?=\s|$|像素)/g,
+    "$1$2"
+  );
+  return joinedMovementDistance.split(/\s*(?:然后|并且|接着|随后|再(?=画|创建|选|把|将|向|往|顶部|底部|左|右|水平|垂直|保存|复制|删除|置|组合|取消组合))\s*/).filter(Boolean);
 }
 
 // Sorted by key length descending so "椭圆形" matches before "圆"

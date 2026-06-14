@@ -413,6 +413,12 @@ test("选中实体方向移动不会被误判为选择命令", () => {
   assert.deepEqual(parseCommand("把选中的实体右移二十"), [{
     type: "move", target: "selected", dx: 20, dy: 0
   }]);
+  assert.deepEqual(parseCommand("左移，100。", { selected: true }), [{
+    type: "move", target: "selected", dx: -100, dy: 0
+  }]);
+  assert.deepEqual(parseCommand("向上移动，二十像素。", { selected: true }), [{
+    type: "move", target: "selected", dx: 0, dy: -20
+  }]);
 });
 
 test("扩展常见场景实体可被后续语音修改", () => {
