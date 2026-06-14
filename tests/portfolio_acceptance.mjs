@@ -5,8 +5,13 @@ const portfolio = JSON.parse(fs.readFileSync(new URL("../docs/portfolio.json", i
 const summary = portfolioSummary(portfolio.subjects);
 console.log(`Portfolio: ${summary.total} subjects`);
 console.log(`Note: ${summary.note}`);
-for (const entry of summary.entries) {
-  const storybookInfo = entry.styles.storybook;
-  console.log(`${entry.title}: ${storybookInfo.composition} | ${storybookInfo.draftsCount} drafts | requires visual review`);
+for (const entry of summary.flagship) {
+  const results = entry.drafts.map(draft => `${draft.variant + 1}:${draft.quality.score}`).join(" ");
+  console.log(`${entry.themeId}: ${results} | ${entry.passed ? "PASS" : "FAIL"}`);
 }
-console.log("Portfolio structural evaluation complete. Visual acceptance requires manual review.");
+if (!summary.passed) {
+  console.error("Portfolio structural quality gate failed.");
+  process.exitCode = 1;
+} else {
+  console.log("Portfolio structural quality gate passed. Visual acceptance still requires browser review.");
+}

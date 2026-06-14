@@ -1,11 +1,8 @@
 import { ART_STYLES, generateCompositionDrafts } from "./art_schema.js";
+import { evaluateFlagshipPortfolio } from "./quality_score.js";
 
-/**
- * Evaluate portfolio subjects structurally, without auto-filled completion scores.
- * Visual acceptance is performed manually via the entity gallery and benchmark scenes pages.
- */
 export function evaluatePortfolio(subjects) {
-  if (!Array.isArray(subjects) || subjects.length < 6) throw new Error("作品集题材不足");
+  if (!Array.isArray(subjects) || subjects.length < 12) throw new Error("作品集题材不足");
   return subjects.map(subject => {
     const styles = Object.fromEntries(ART_STYLES.map(style => {
       const drafts = generateCompositionDrafts(subject.title, style, 1);
@@ -13,25 +10,23 @@ export function evaluatePortfolio(subjects) {
         field => new Set(drafts.map(draft => draft[field])).size === 3
       );
       return [style, {
-        composition: distinct ? "三稿差异明显" : "小稿差异不足",
+        composition: distinct ? "three-distinct-drafts" : "insufficient-difference",
         draftsCount: drafts.length,
         requiresVisualReview: true
       }];
     }));
-    return {
-      id: subject.id,
-      title: subject.title,
-      styles,
-      requiresVisualReview: true
-    };
+    return { id: subject.id, title: subject.title, styles, requiresVisualReview: true };
   });
 }
 
 export function portfolioSummary(subjects) {
   const entries = evaluatePortfolio(subjects);
+  const flagship = evaluateFlagshipPortfolio();
   return {
     entries,
+    flagship,
     total: entries.length,
-    note: "视觉验收需通过 26 实体图鉴和六张标杆场景人工审查"
+    passed: flagship.every(entry => entry.passed),
+    note: "结构质量门禁自动执行；视觉完成度仍需浏览器人工审查。"
   };
 }

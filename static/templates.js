@@ -3,6 +3,9 @@ import {
   LINE_TIERS, seedFromString, createRNG, clamp, penPath, taperedStroke,
   createPenElement, generateHatchLines, namespaceId, countPathNodes, checkNodeLimit
 } from "./pen_stroke.js";
+import {
+  freehandStroke, organicContour, organicCurve, perturbPath, paperGrain
+} from "./lib/art-engine.js";
 
 const NS = "http://www.w3.org/2000/svg";
 
@@ -167,6 +170,46 @@ function addHatching(group, bounds, angle, spacing, count, stroke, tier, rng) {
   }
 }
 
+function adapterFreehand(group, points, options = {}) {
+  const d = freehandStroke(points, {
+    size: options.size || 8,
+    thinning: options.thinning ?? 0.45,
+    smoothing: options.smoothing ?? 0.7,
+    streamline: options.streamline ?? 0.55,
+    taperStart: options.taperStart ?? 0.08,
+    taperEnd: options.taperEnd ?? 0.08,
+    seed: options.seed || "storybook"
+  });
+  if (!d) return null;
+  return add(group, "path", {
+    d,
+    fill: options.fill || PALETTE.ink,
+    stroke: "none",
+    opacity: options.opacity ?? 1,
+    "data-art-adapter": "perfect-freehand",
+    "data-line-tier": options.tier || "outline"
+  });
+}
+
+function adapterContour(group, points, attrs = {}, seed = "contour") {
+  const perturbed = perturbPath(points, seed, 1.2, 0.08);
+  const contour = organicContour(perturbed);
+  const pathPoints = contour.length >= 3 ? contour : perturbed;
+  if (pathPoints.length < 3) return null;
+  const midpoint = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const start = midpoint(pathPoints.at(-1), pathPoints[0]);
+  const d = [
+    `M${start[0].toFixed(1)} ${start[1].toFixed(1)}`,
+    ...pathPoints.map((point, index) => {
+      const next = pathPoints[(index + 1) % pathPoints.length];
+      const mid = midpoint(point, next);
+      return `Q${point[0].toFixed(1)} ${point[1].toFixed(1)} ${mid[0].toFixed(1)} ${mid[1].toFixed(1)}`;
+    }),
+    "Z"
+  ].join(" ");
+  return add(group, "path", { ...attrs, d, "data-art-adapter": "d3-shape+simplex-noise" });
+}
+
 function shadowEllipse(group, cx, cy, rx, ry, fill, opacity) {
   add(group, "ellipse", {
     cx: cx.toFixed(1), cy: cy.toFixed(1),
@@ -198,6 +241,20 @@ function renderPerson(entity, quality, namespace) {
   const sw = Math.max(1.8, Math.min(w, h) * 0.016);
   const isWoman = variant === "woman";
   const isWalking = pose === "walking";
+  const volumeLimb = (points, limbColor, seed, size) => {
+    if (isFull) {
+      return adapterFreehand(group, organicCurve(points), {
+        size, fill: limbColor, seed, tier: "anatomy"
+      });
+    }
+    const d = points.length === 3
+      ? `M${points[0][0]} ${points[0][1]} Q${points[1][0]} ${points[1][1]} ${points[2][0]} ${points[2][1]}`
+      : `M${points.map(point => `${point[0]} ${point[1]}`).join(" L")}`;
+    return add(group, "path", {
+      d, fill: "none", stroke: limbColor, "stroke-width": size,
+      "stroke-linecap": "round", "stroke-linejoin": "round", "data-anatomy": "volume-limb"
+    });
+  };
 
   // Ground shadow
   shadowEllipse(group, w * 0.50, h * 0.965, w * 0.32, h * 0.025, PALETTE.night, 0.20);
@@ -230,24 +287,27 @@ function renderPerson(entity, quality, namespace) {
   const rLegPts = isWalking
     ? [[w * 0.62, hipY], [w * 0.66, kneeY], [w * 0.70, h * 0.84], [rfx, footY - h * 0.01]]
     : [[w * 0.60, hipY], [w * 0.62, kneeY], [w * 0.63, h * 0.84], [rfx, footY - h * 0.01]];
-  penLineToGroup(group, lLegPts, { tier: "outline", baseWidth: sw * 1.3, stroke: ink, rng });
-  penLineToGroup(group, rLegPts, { tier: "outline", baseWidth: sw * 1.3, stroke: ink, rng });
+  volumeLimb(lLegPts, shade(color, -22), `${entity.id}-left-leg`, w * 0.085);
+  volumeLimb(rLegPts, shade(color, -28), `${entity.id}-right-leg`, w * 0.085);
+  add(group, "ellipse", { cx: lLegPts[1][0], cy: lLegPts[1][1], rx: w * 0.045, ry: w * 0.04, fill: shade(color, -18), "data-joint": "knee" });
+  add(group, "ellipse", { cx: rLegPts[1][0], cy: rLegPts[1][1], rx: w * 0.045, ry: w * 0.04, fill: shade(color, -24), "data-joint": "knee" });
 
   // === BODY / TORSO ===
   const shoulderY = h * 0.30;
   const waistY = h * 0.50;
   const bodyPts = isWoman
-    ? [[w * 0.34, shoulderY], [w * 0.32, h * 0.38], [w * 0.29, waistY],
-       [w * 0.28, h * 0.58], [w * 0.27, h * 0.68],
-       [w * 0.73, h * 0.68], [w * 0.72, h * 0.58], [w * 0.71, waistY],
-       [w * 0.68, h * 0.38], [w * 0.66, shoulderY]]
-    : [[w * 0.36, shoulderY], [w * 0.34, h * 0.38], [w * 0.33, waistY],
-       [w * 0.35, h * 0.60], [w * 0.36, h * 0.68],
-       [w * 0.64, h * 0.68], [w * 0.65, h * 0.60], [w * 0.67, waistY],
-       [w * 0.66, h * 0.38], [w * 0.64, shoulderY]];
-  const bodyD = `M${bodyPts.map(p => p.map(v => v.toFixed(1)).join(",")).join(" L")} Z`;
-  add(group, "path", { d: bodyD, fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: "none", "data-color-block": "body" });
-  penLineToGroup(group, [...bodyPts, bodyPts[0]], { tier: "outline", baseWidth: sw, stroke: ink, rng, closed: true });
+    ? [[w * 0.34, shoulderY], [w * 0.27, h * 0.46], [w * 0.31, h * 0.66], [w * 0.50, h * 0.71],
+       [w * 0.69, h * 0.66], [w * 0.73, h * 0.46], [w * 0.66, shoulderY], [w * 0.50, h * 0.28]]
+    : [[w * 0.34, shoulderY], [w * 0.30, h * 0.47], [w * 0.36, h * 0.68], [w * 0.50, h * 0.70],
+       [w * 0.64, h * 0.68], [w * 0.70, h * 0.47], [w * 0.66, shoulderY], [w * 0.50, h * 0.28]];
+  adapterContour(group, bodyPts, {
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`,
+    stroke: ink,
+    "stroke-width": sw.toFixed(2),
+    "stroke-linejoin": "round",
+    "data-color-block": "body",
+    "data-anatomy": "organic-torso"
+  }, `${entity.id}-torso`);
 
   // === CLOTHING DETAILS ===
   if (isFull) {
@@ -277,10 +337,12 @@ function renderPerson(entity, quality, namespace) {
   const lHndX = armRelaxed ? w * 0.14 : w * 0.20, lHndY = armRelaxed ? h * 0.60 : h * 0.54;
   const rElbX = armRelaxed ? w * 0.82 : w * 0.74, rElbY = armRelaxed ? h * 0.46 : h * 0.42;
   const rHndX = armRelaxed ? w * 0.86 : w * 0.80, rHndY = armRelaxed ? h * 0.60 : h * 0.54;
-  penLineToGroup(group, [[lShX, shY], [lElbX - w * 0.01, lElbY - h * 0.01], [lElbX, lElbY], [lElbX + w * 0.01, lElbY + h * 0.01], [lHndX, lHndY]],
-    { tier: "outline", baseWidth: sw * 0.8, stroke: ink, rng });
-  penLineToGroup(group, [[rShX, shY], [rElbX + w * 0.01, rElbY - h * 0.01], [rElbX, rElbY], [rElbX - w * 0.01, rElbY + h * 0.01], [rHndX, rHndY]],
-    { tier: "outline", baseWidth: sw * 0.8, stroke: ink, rng });
+  const leftArm = [[lShX, shY], [lElbX, lElbY], [lHndX, lHndY]];
+  const rightArm = [[rShX, shY], [rElbX, rElbY], [rHndX, rHndY]];
+  volumeLimb(leftArm, shade(color, -12), `${entity.id}-left-arm`, w * 0.072);
+  volumeLimb(rightArm, shade(color, -18), `${entity.id}-right-arm`, w * 0.072);
+  add(group, "ellipse", { cx: lElbX, cy: lElbY, rx: w * 0.038, ry: w * 0.035, fill: shade(color, -10), "data-joint": "elbow" });
+  add(group, "ellipse", { cx: rElbX, cy: rElbY, rx: w * 0.038, ry: w * 0.035, fill: shade(color, -16), "data-joint": "elbow" });
   // Hands (visible at base quality for recognition)
   penLineToGroup(group, [[lHndX - w * 0.02, lHndY - h * 0.01], [lHndX + w * 0.02, lHndY + h * 0.01]],
     { tier: "structure", baseWidth: sw * 0.5, stroke: PALETTE.skin, rng });
@@ -1130,17 +1192,18 @@ function renderCloud(entity, quality, namespace) {
   add(group, "ellipse", { cx: (w * 0.50).toFixed(1), cy: (h * 0.78).toFixed(1), rx: (w * 0.46).toFixed(1), ry: (h * 0.14).toFixed(1), fill: shade(color, -30), opacity: "0.20", stroke: "none" });
 
   // Main cloud shape — bezier puff path for organic silhouette
-  add(group, "path", {
-    d: [
-      `M${(w * 0.08).toFixed(1)} ${(h * 0.64).toFixed(1)}`,
-      `C${(w * 0.06).toFixed(1)} ${(h * 0.38).toFixed(1)} ${(w * 0.20).toFixed(1)} ${(h * 0.32).toFixed(1)} ${(w * 0.28).toFixed(1)} ${(h * 0.38).toFixed(1)}`,
-      `C${(w * 0.24).toFixed(1)} ${(h * 0.20).toFixed(1)} ${(w * 0.42).toFixed(1)} ${(h * 0.22).toFixed(1)} ${(w * 0.50).toFixed(1)} ${(h * 0.32).toFixed(1)}`,
-      `C${(w * 0.56).toFixed(1)} ${(h * 0.18).toFixed(1)} ${(w * 0.72).toFixed(1)} ${(h * 0.24).toFixed(1)} ${(w * 0.78).toFixed(1)} ${(h * 0.36).toFixed(1)}`,
-      `C${(w * 0.86).toFixed(1)} ${(h * 0.28).toFixed(1)} ${(w * 0.96).toFixed(1)} ${(h * 0.45).toFixed(1)} ${(w * 0.90).toFixed(1)} ${(h * 0.60).toFixed(1)}`,
-      `L${(w * 0.08).toFixed(1)} ${(h * 0.64).toFixed(1)} Z`
-    ].join(" "),
-    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`, stroke: ink, "stroke-width": sw.toFixed(2)
-  });
+  adapterContour(group, [
+    [w * 0.08, h * 0.64], [w * 0.10, h * 0.43], [w * 0.26, h * 0.36],
+    [w * 0.34, h * 0.22], [w * 0.50, h * 0.31], [w * 0.64, h * 0.20],
+    [w * 0.78, h * 0.37], [w * 0.91, h * 0.43], [w * 0.90, h * 0.62],
+    [w * 0.68, h * 0.69], [w * 0.45, h * 0.66], [w * 0.24, h * 0.70]
+  ], {
+    fill: `url(#${namespaceId(ns, `grad-${entity.id}`)})`,
+    stroke: ink,
+    "stroke-width": sw.toFixed(2),
+    "stroke-linejoin": "round",
+    "data-organic-cloud": "true"
+  }, `${entity.id}-cloud`);
   // Lower edge detail
   penLineToGroup(group, [[w * 0.10, h * 0.62], [w * 0.28, h * 0.65], [w * 0.50, h * 0.60], [w * 0.72, h * 0.63], [w * 0.88, h * 0.60]],
     { tier: "structure", baseWidth: sw * 0.5, stroke: shade(color, -15), rng });
@@ -1149,6 +1212,15 @@ function renderCloud(entity, quality, namespace) {
     // Fluff texture
     repeat(group, 10, i => {
       penLineToGroup(group, [[w * (0.12 + i * 0.08), h * (0.46 + (i % 3) * 0.06)], [w * (0.15 + i * 0.08), h * (0.40 + (i % 3) * 0.04)]], { tier: "texture", baseWidth: sw * 0.22, stroke: shade(color, 5), rng });
+    });
+    repeat(group, 7, i => {
+      const grain = paperGrain(i * 17, i * 29, entity.id);
+      add(group, "ellipse", {
+        cx: (w * (0.18 + i * 0.095)).toFixed(1), cy: (h * (0.42 + grain * 0.16)).toFixed(1),
+        rx: (w * (0.018 + grain * 0.012)).toFixed(1), ry: (h * 0.018).toFixed(1),
+        fill: PALETTE.cream, opacity: (0.12 + grain * 0.12).toFixed(2),
+        "data-art-adapter": "simplex-noise"
+      });
     });
   }
 
@@ -1500,6 +1572,19 @@ function renderGrass(entity, quality, namespace) {
     });
     penLineToGroup(group, [[x, h * 0.69], [x + w * 0.015, h * 0.45], [x + w * 0.028, top + h * 0.03]], {
       tier: "structure", baseWidth: sw * 0.55, stroke: i % 3 ? shade(color, -5) : shade(accent, -5), rng: bladeRng
+    });
+  });
+
+  repeat(group, 9, i => {
+    const x = w * (0.04 + i * 0.115);
+    const grain = paperGrain(x, h * 0.5, entity.id);
+    adapterFreehand(group, organicCurve([
+      [x - w * 0.045, h * (0.60 + grain * 0.04)],
+      [x, h * (0.35 - grain * 0.08)],
+      [x + w * 0.05, h * (0.58 + grain * 0.03)]
+    ]), {
+      size: Math.max(2.5, sw * 1.8), fill: i % 2 ? shade(color, 12) : accent,
+      opacity: 0.72, seed: `${entity.id}-grass-clump-${i}`, tier: "texture"
     });
   });
 

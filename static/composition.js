@@ -1,171 +1,90 @@
-/**
- * Composition Evaluation — Listen Paint Art Engine v4
- *
- * Evaluates and validates scene composition against art direction rules.
- * Checks focus scale, occlusion, negative space, depth layers, palette
- * harmony, and lighting consistency at the entity layout level.
- */
-
 import { CANVAS } from "./model.js";
 import { getGrammarCategory } from "./shape_grammar.js";
-import { getLightingProfile } from "./lighting.js";
 
-const COMPOSITION_RULES = {
-  // Minimum size ratio of focus entity relative to canvas
-  minFocusScale: 0.08,
-  // Maximum size ratio (prevent over-large subjects)
-  maxFocusScale: 0.60,
-  // Minimum negative space ratio
-  minNegativeSpace: 0.10,
-  // Minimum depth layers required for a valid scene
-  minDepthLayers: 2,
-  // Maximum entity count per depth layer
-  maxPerLayer: 30,
-  // Minimum entity overlap threshold (too much overlap = bad)
-  maxOverlapRatio: 0.60
-};
+export const COMPOSITION_RULES = Object.freeze({
+  minFocusScale: 0.06,
+  maxFocusScale: 0.55,
+  minOccupiedArea: 0.18,
+  maxOccupiedArea: 0.88,
+  minDepthLayers: 3,
+  maxOverlapRatio: 0.48,
+  maxPerLayer: 30
+});
 
-/**
- * Evaluate a scene composition and return a quality report.
- *
- * @param {Array<object>} entities - array of entity objects
- * @param {object} scene - scene metadata
- * @param {object} renderProfile - render profile
- * @returns {object} { passed: boolean, issues: Array<{rule, detail}>, scores: object }
- */
+function focusEntity(entities) {
+  return entities.find(entity => entity.role === "主角" || entity.role === "focus")
+    || entities.find(entity => getGrammarCategory(entity.templateId)?.key === "figure")
+    || entities.find(entity => (entity.layer || 0) >= 0)
+    || entities[0];
+}
+
+function boundsOf(entities) {
+  const x1 = Math.min(...entities.map(entity => entity.x));
+  const y1 = Math.min(...entities.map(entity => entity.y));
+  const x2 = Math.max(...entities.map(entity => entity.x + entity.width));
+  const y2 = Math.max(...entities.map(entity => entity.y + entity.height));
+  return { width: Math.max(0, x2 - x1), height: Math.max(0, y2 - y1) };
+}
+
+function overlapRatio(a, b) {
+  const width = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const height = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  return (width * height) / Math.max(1, Math.min(a.width * a.height, b.width * b.height));
+}
+
 export function evaluateComposition(entities, scene = {}, renderProfile = {}) {
+  const entityArr = entities.filter(entity => entity.kind === "entity");
+  if (!entityArr.length) return { passed: true, issues: [], scores: { entityCount: 0, occupiedArea: 0 } };
+
   const issues = [];
-  const scores = {};
-  const entityArr = entities.filter(e => e.kind === "entity");
+  const canvasArea = CANVAS.width * CANVAS.height;
+  const focus = focusEntity(entityArr);
+  const focusScale = (focus.width * focus.height) / canvasArea;
+  const visibleEntities = entityArr.filter(entity => getGrammarCategory(entity.templateId)?.key !== "atmosphere");
+  const bounds = boundsOf(visibleEntities.length ? visibleEntities : entityArr);
+  const occupiedArea = (bounds.width * bounds.height) / canvasArea;
+  const layers = new Set(entityArr.map(entity => entity.layer || 0));
+  const overlaps = [];
 
-  if (entityArr.length === 0) {
-    return { passed: true, issues: [], scores: { entityCount: 0 } };
-  }
-
-  // 1. Check focus entity scale
-  const focusEntity = entityArr.find(e => e.role === "主角")
-    || entityArr.find(e => e.layer >= 0)
-    || entityArr[0];
-
-  if (focusEntity) {
-    const focusArea = (focusEntity.width * focusEntity.height) / (CANVAS.width * CANVAS.height);
-    scores.focusScale = focusArea;
-    if (focusArea < COMPOSITION_RULES.minFocusScale) {
-      issues.push({ rule: "focus-too-small", detail: `主体占据画布 ${(focusArea * 100).toFixed(1)}%，低于最低 ${(COMPOSITION_RULES.minFocusScale * 100).toFixed(0)}%` });
-    }
-    if (focusArea > COMPOSITION_RULES.maxFocusScale) {
-      issues.push({ rule: "focus-too-large", detail: `主体过大，占据画布 ${(focusArea * 100).toFixed(1)}%` });
+  for (let i = 0; i < visibleEntities.length; i++) {
+    for (let j = i + 1; j < visibleEntities.length; j++) {
+      if ((visibleEntities[i].layer || 0) === (visibleEntities[j].layer || 0)) overlaps.push(overlapRatio(visibleEntities[i], visibleEntities[j]));
     }
   }
+  const avgOverlap = overlaps.length ? overlaps.reduce((sum, value) => sum + value, 0) / overlaps.length : 0;
 
-  // 2. Check depth layers
-  const layers = new Set(entityArr.map(e => e.layer || 0));
-  scores.depthLayers = layers.size;
-  if (layers.size < COMPOSITION_RULES.minDepthLayers) {
-    issues.push({ rule: "insufficient-depth", detail: `场景只有 ${layers.size} 个深度层次，需要至少 ${COMPOSITION_RULES.minDepthLayers} 层` });
-  }
-
-  // 3. Check occlusion (entity overlap)
-  if (entityArr.length >= 2) {
-    let totalOverlapArea = 0;
-    let pairCount = 0;
-    for (let i = 0; i < entityArr.length; i++) {
-      for (let j = i + 1; j < entityArr.length; j++) {
-        const a = entityArr[i], b = entityArr[j];
-        const overlap = rectOverlap(a, b);
-        if (overlap > 0) {
-          totalOverlapArea += overlap / (a.width * a.height);
-          pairCount++;
-        }
-      }
-    }
-    if (pairCount > 0) {
-      scores.avgOverlap = totalOverlapArea / pairCount;
-      if (scores.avgOverlap > COMPOSITION_RULES.maxOverlapRatio) {
-        issues.push({ rule: "severe-occlusion", detail: "实体间遮挡过于严重" });
-      }
-    } else {
-      scores.avgOverlap = 0;
-    }
-  }
-
-  // 4. Check negative space
-  const totalEntityArea = entityArr.reduce((sum, e) => sum + e.width * e.height, 0);
-  const negativeSpace = 1 - totalEntityArea / (CANVAS.width * CANVAS.height);
-  scores.negativeSpace = negativeSpace;
-  if (negativeSpace < COMPOSITION_RULES.minNegativeSpace && entityArr.length > 1) {
-    issues.push({ rule: "insufficient-negative-space", detail: `留白比例 ${(negativeSpace * 100).toFixed(1)}%，低于最低 ${(COMPOSITION_RULES.minNegativeSpace * 100).toFixed(0)}%` });
-  }
-
-  // 5. Check entity count per layer
-  for (const layer of layers) {
-    const count = entityArr.filter(e => (e.layer || 0) === layer).length;
-    if (count > COMPOSITION_RULES.maxPerLayer) {
-      issues.push({ rule: "too-many-per-layer", detail: `深度层 ${layer} 中有 ${count} 个实体，超过上限 ${COMPOSITION_RULES.maxPerLayer}` });
-    }
-  }
-
-  // 6. Check category balance
-  const categories = new Set();
-  for (const e of entityArr) {
-    const cat = getGrammarCategory(e.templateId);
-    if (cat) categories.add(cat.key);
-  }
-  scores.categoryCount = categories.size;
+  if (focusScale < COMPOSITION_RULES.minFocusScale) issues.push({ rule: "focus-too-small", detail: focusScale });
+  if (focusScale > COMPOSITION_RULES.maxFocusScale) issues.push({ rule: "focus-too-large", detail: focusScale });
+  if (entityArr.length >= 3 && layers.size < COMPOSITION_RULES.minDepthLayers) issues.push({ rule: "insufficient-depth", detail: layers.size });
+  if (entityArr.length >= 2 && occupiedArea < COMPOSITION_RULES.minOccupiedArea) issues.push({ rule: "excessive-negative-space", detail: occupiedArea });
+  if (occupiedArea > COMPOSITION_RULES.maxOccupiedArea) issues.push({ rule: "insufficient-negative-space", detail: occupiedArea });
+  if (avgOverlap > COMPOSITION_RULES.maxOverlapRatio) issues.push({ rule: "severe-occlusion", detail: avgOverlap });
 
   return {
     passed: issues.length === 0,
     issues,
-    scores
+    scores: {
+      entityCount: entityArr.length,
+      focusScale,
+      occupiedArea,
+      negativeSpace: 1 - occupiedArea,
+      depthLayers: layers.size,
+      avgOverlap,
+      categoryCount: new Set(entityArr.map(entity => getGrammarCategory(entity.templateId)?.key).filter(Boolean)).size
+    }
   };
 }
 
-/**
- * Compute the overlap area ratio between two entity rectangles.
- *
- * @param {object} a - entity with x, y, width, height
- * @param {object} b - entity with x, y, width, height
- * @returns {number} overlap area (0 if no overlap)
- */
-function rectOverlap(a, b) {
-  const ax2 = a.x + a.width, ay2 = a.y + a.height;
-  const bx2 = b.x + b.width, by2 = b.y + b.height;
-  const overlapX = Math.max(0, Math.min(ax2, bx2) - Math.max(a.x, b.x));
-  const overlapY = Math.max(0, Math.min(ay2, by2) - Math.max(a.y, b.y));
-  return overlapX * overlapY;
-}
-
-/**
- * Check if an entity is positioned within a valid canvas region.
- *
- * @param {object} entity
- * @param {number} [margin=50] - margin from canvas edge
- * @returns {boolean}
- */
 export function isInCanvasBounds(entity, margin = 50) {
-  return entity.x >= -margin
-    && entity.y >= -margin
+  return entity.x >= -margin && entity.y >= -margin
     && entity.x + entity.width <= CANVAS.width + margin
     && entity.y + entity.height <= CANVAS.height + margin;
 }
 
-/**
- * Compute the visual weight of an entity.
- * Larger, more central entities have higher weight.
- *
- * @param {object} entity
- * @returns {number}
- */
 export function visualWeight(entity) {
   const area = entity.width * entity.height;
-  const canvasArea = CANVAS.width * CANVAS.height;
   const cx = entity.x + entity.width / 2;
   const cy = entity.y + entity.height / 2;
-  // Distance from center (normalized)
-  const distFromCenter = Math.sqrt(
-    Math.pow((cx - CANVAS.width / 2) / (CANVAS.width / 2), 2) +
-    Math.pow((cy - CANVAS.height / 2) / (CANVAS.height / 2), 2)
-  );
-  const centrality = Math.max(0, 1 - distFromCenter);
-  return (area / canvasArea) * (0.5 + centrality * 0.5);
+  const distance = Math.hypot((cx - CANVAS.width / 2) / (CANVAS.width / 2), (cy - CANVAS.height / 2) / (CANVAS.height / 2));
+  return (area / (CANVAS.width * CANVAS.height)) * (0.5 + Math.max(0, 1 - distance) * 0.5);
 }

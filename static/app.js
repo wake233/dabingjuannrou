@@ -209,13 +209,40 @@ function applyArtEngineToEntities(objects, renderOptions = {}) {
   }
 }
 
+export function prepareArtRenderObjects(objects, renderOptions = {}) {
+  const prepared = objects.map(object => ({
+    ...object,
+    params: object.params ? { ...object.params } : object.params
+  }));
+  const style = engine.state.art.artDirection.style || "storybook";
+  const pipeline = executeArtPipeline(prepared, engine.state.scene, engine.state.art.renderProfile || {}, style);
+  for (const entity of pipeline.entities.filter(object => object.kind === "entity")) {
+    entity._artPipelineVersion = pipeline.metadata.pipelineVersion;
+    entity._artDirectorAccepted = pipeline.directorResult.accepted;
+    entity._artDirectorCorrections = pipeline.directorResult.corrections.length;
+    entity._artRejectionReason = pipeline.directorResult.rejectionReason;
+  }
+  return {
+    objects: pipeline.entities,
+    accepted: pipeline.directorResult.accepted,
+    corrections: pipeline.directorResult.corrections,
+    rejectionReason: pipeline.directorResult.rejectionReason,
+    metadata: pipeline.metadata
+  };
+}
+
 function renderObjects(layerElement, objects, selection = [], textureDataUrl = "", renderOptions = {}) {
-  // Apply art engine pipeline to entities for lighting/material metadata
-  applyArtEngineToEntities(objects, renderOptions);
+  const prepared = prepareArtRenderObjects(objects, renderOptions);
+  applyArtEngineToEntities(prepared.objects, renderOptions);
 
   const selectionSet = new Set(selection);
-  const rendered = objects.map(o => {
+  const rendered = prepared.objects.map(o => {
     const el = svgElement(o, renderOptions);
+    if (o.kind === "entity") {
+      el.setAttribute("data-art-pipeline", o._artPipelineVersion || "none");
+      el.setAttribute("data-art-director", o._artDirectorAccepted ? "accepted" : "fallback");
+      el.setAttribute("data-art-corrections", String(o._artDirectorCorrections || 0));
+    }
     if (selectionSet.has(o.id) && !renderOptions.noSelectionHighlight) {
       el.setAttribute("filter", "url(#selection-glow)");
     }
