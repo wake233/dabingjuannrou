@@ -433,3 +433,19 @@ test("常见丰富场景由本地构图器稳定生成完整分层画面", () =>
   const appended = parseCommand("画一个下雨天打伞的女人", { entityNames: rainyWoman.slice(1).map(action => action.name) });
   assert.ok(appended.slice(1).every(action => !rainyWoman.slice(1).some(existing => existing.name === action.name)));
 });
+
+test("艺术创作语音可生成选取混合精修锁定并切换风格", () => {
+  assert.deepEqual(parseCommand("生成三张水墨构图小稿，雨中归人"), [{
+    type: "creative", operation: "generate_drafts", theme: "雨中归人", style: "ink"
+  }]);
+  assert.deepEqual(parseCommand("选择第二张小稿", { draftGeneration: 2 }), [{
+    type: "creative", operation: "select_draft", draftId: "draft-2-2"
+  }]);
+  assert.deepEqual(parseCommand("混合第一和第三", { draftGeneration: 2 }), [{
+    type: "creative", operation: "mix_drafts", draftIds: ["draft-2-1", "draft-2-3"]
+  }]);
+  assert.deepEqual(parseCommand("保持构图"), [{ type: "creative", operation: "lock", field: "composition" }]);
+  assert.deepEqual(parseCommand("取消锁定构图"), [{ type: "creative", operation: "unlock", field: "composition" }]);
+  assert.deepEqual(parseCommand("右侧留白更多"), [{ type: "creative", operation: "refine", instruction: "右侧留白更多" }]);
+  assert.deepEqual(parseCommand("切换成木刻风格"), [{ type: "creative", operation: "set_style", style: "woodcut" }]);
+});

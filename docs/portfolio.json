@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "criteria": ["composition", "visualHierarchy", "narrative", "styleConsistency", "finish"],
+  "subjects": [
+    {"id":"rain-woman","title":"雨中打伞的女人","directions":["孤独冷雨","温暖归途"]},
+    {"id":"moon-cat","title":"月夜屋顶的猫","directions":["静谧凝望","风起追逐"]},
+    {"id":"spring-river","title":"春日河岸","directions":["开阔明朗","含蓄留白"]},
+    {"id":"quiet-street","title":"安静街道","directions":["清晨薄雾","黄昏灯火"]},
+    {"id":"child-tree","title":"树下读书的孩子","directions":["亲密聚焦","环境叙事"]},
+    {"id":"boat-bridge","title":"桥下小船","directions":["水平舒缓","对角动势"]},
+    {"id":"mountain-traveler","title":"山路旅人","directions":["人物渺小","英雄焦点"]},
+    {"id":"wind-birds","title":"风中的飞鸟","directions":["密集节奏","大片留白"]},
+    {"id":"lamp-rain","title":"雨夜路灯","directions":["高反差","柔和叙事"]},
+    {"id":"garden-dog","title":"花园里的狗","directions":["活泼近景","安静远景"]},
+    {"id":"river-bicycle","title":"河畔自行车","directions":["春日轻快","孤寂停驻"]},
+    {"id":"snow-house","title":"雪地房屋","directions":["温暖窗光","冷峻寂静"]}
+  ]
+}

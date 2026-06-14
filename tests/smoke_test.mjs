@@ -125,13 +125,13 @@ check("雨中人物场景+修改 → 两条原子历史", () => {
   if (engine.state.objects.find(o => o.name === "伞").params.color !== "#ef4444") throw new Error("伞未改红");
 });
 
-check("版本 2 工程保留场景和实体", () => {
+check("版本 3 工程保留场景、实体和创作状态", () => {
   const engine = new model.DrawingEngine();
   engine.execute([{ type: "entity_create", templateId: "cat", name: "猫", x: 100, y: 100, width: 120, height: 100, params: { direction: "left" } }]);
   const project = engine.serializeProject();
   const restored = new model.DrawingEngine();
   restored.loadProject(project);
-  if (project.version !== 2 || restored.state.objects[0].params.direction !== "left") throw new Error("工程恢复失败");
+  if (project.version !== 3 || restored.state.objects[0].params.direction !== "left" || !restored.state.art) throw new Error("工程恢复失败");
 });
 
 check("本地常见场景构图器生成丰富雨中女人画面", () => {

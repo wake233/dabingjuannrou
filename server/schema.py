@@ -5,7 +5,7 @@ import re
 ALLOWED_ACTIONS = {
     "create", "select", "update", "move", "align", "distribute", "duplicate",
     "delete", "group", "ungroup", "history", "canvas", "export", "help", "status",
-    "entity_create", "entity_update", "scene_update",
+    "entity_create", "entity_update", "scene_update", "creative",
 }
 ENTITY_TEMPLATES = {
     "person": {"color", "accent", "pose", "direction", "variant"},
@@ -47,6 +47,7 @@ ACTION_FIELDS = {
     "entity_create": {"type", "templateId", "name", "role", "x", "y", "width", "height", "rotation", "opacity", "layer", "params"},
     "entity_update": {"type", "target", "changes"},
     "scene_update": {"type", "changes"},
+    "creative": {"type", "operation", "theme", "style", "draftId", "draftIds", "instruction", "target", "field"},
 }
 COLOR_PATTERN = re.compile(r"^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$", re.I)
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
@@ -83,7 +84,8 @@ STT_PROMPT = (
     # Quantity
     "放大 缩小 宽度 高度 尺寸 像素 "
     # Wake words
-    "听画 开始画 嘿画布"
+    "听画 开始画 嘿画布 绘本 木刻 水墨 小稿 构图方案 混合方案 锁定 解锁 "
+    "焦点 氛围 节奏 光线 留白 更孤独 加强风感"
 )
 
 
@@ -243,6 +245,36 @@ def validate_action(action):
     elif action_type == "scene_update":
         require_fields(action, "changes")
         validate_scene_changes(action["changes"])
+    elif action_type == "creative":
+        require_fields(action, "operation")
+        operation = action["operation"]
+        if not allowed_value(operation, {"generate_drafts", "select_draft", "mix_drafts", "refine", "lock", "unlock", "set_style"}):
+            raise ValueError("创作操作无效")
+        if "theme" in action:
+            validate_string(action["theme"], False, 500)
+        if "style" in action and not allowed_value(action["style"], {"storybook", "woodcut", "ink"}):
+            raise ValueError("艺术风格无效")
+        if "draftId" in action:
+            validate_string(action["draftId"], False, 100)
+        if "draftIds" in action and (
+            not isinstance(action["draftIds"], list) or len(action["draftIds"]) != 2
+            or any(not isinstance(value, str) or not value or len(value) > 100 for value in action["draftIds"])
+        ):
+            raise ValueError("混合小稿无效")
+        if "instruction" in action:
+            validate_string(action["instruction"], False, 500)
+        if "field" in action and not allowed_value(action["field"], {"composition", "palette", "light", "focus", "atmosphere", "rhythm", "negativeSpace"}):
+            raise ValueError("锁定字段无效")
+        if "target" in action:
+            validate_target(action["target"])
+        required = {
+            "generate_drafts": ("theme", "style"), "select_draft": ("draftId",), "mix_drafts": ("draftIds",),
+            "refine": ("instruction",), "set_style": ("style",),
+        }
+        if operation in required:
+            require_fields(action, *required[operation])
+        if operation in {"lock", "unlock"} and "field" not in action and "target" not in action:
+            raise ValueError("锁定目标无效")
     elif action_type == "create":
         require_fields(action, "kind")
         if not allowed_value(action["kind"], KINDS):

@@ -34,6 +34,17 @@ class Response:
 
 
 class ServerTests(unittest.TestCase):
+    def test_creative_action_validation(self):
+        actions = [{"type": "creative", "operation": "generate_drafts", "theme": "雨中归人", "style": "ink"}]
+        self.assertEqual(validate_actions(actions), actions)
+        for action in [
+            {"type": "creative", "operation": "set_style", "style": "oil"},
+            {"type": "creative", "operation": "mix_drafts", "draftIds": ["one"]},
+            {"type": "creative", "operation": "lock"},
+        ]:
+            with self.assertRaises(ValueError):
+                validate_actions([action])
+
     def test_shared_action_validation_vectors(self):
         vectors = json.loads((Path(__file__).parent / "action_vectors.json").read_text(encoding="utf-8"))
         for actions in vectors["valid"]:

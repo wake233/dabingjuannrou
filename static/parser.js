@@ -468,10 +468,62 @@ export function composeCommonScene(text, existingNames = []) {
   return null;
 }
 
+export function parseCreativeCommand(text, initialContext = {}) {
+  const normalized = normalizeText(fuzzyCorrect(text));
+  const style = /木刻|版画/.test(normalized) ? "woodcut" : /水墨|墨画/.test(normalized) ? "ink" : /绘本/.test(normalized) ? "storybook" : null;
+  if (/生成|创建|看看|给我/.test(normalized) && /小稿|构图方案|构图草稿/.test(normalized)) {
+    const theme = normalized.replace(/(?:请|给我|生成|创建|看看|三张|3张|构图|方案|小稿|草稿|绘本|木刻|版画|水墨|墨画|风格|然后|接着|并且)/g, "").trim() || initialContext.sceneTheme;
+    if (!theme) throw new Error("请先说明创作题材");
+    return [{ type: "creative", operation: "generate_drafts", theme, style: style || "storybook" }];
+  }
+  const draftNumber = normalized.match(/(?:选择|采用|使用)(?:第)?([一二三123])(?:张|个)?(?:小稿|方案)?/);
+  if (draftNumber) {
+    const index = { 一: 1, 二: 2, 三: 3 }[draftNumber[1]] || Number(draftNumber[1]);
+    return [{ type: "creative", operation: "select_draft", draftId: `draft-${initialContext.draftGeneration || 1}-${index}` }];
+  }
+  const mix = normalized.match(/混合(?:第)?([一二三123])(?:张|个)?(?:和|与)(?:第)?([一二三123])/);
+  if (mix) {
+    const number = value => ({ 一: 1, 二: 2, 三: 3 }[value] || Number(value));
+    const generation = initialContext.draftGeneration || 1;
+    return [{ type: "creative", operation: "mix_drafts", draftIds: [`draft-${generation}-${number(mix[1])}`, `draft-${generation}-${number(mix[2])}`] }];
+  }
+  if (/重新生成|重做小稿|换一组小稿/.test(normalized)) {
+    const theme = initialContext.sceneTheme || initialContext.intentNarrative;
+    if (!theme) throw new Error("请先说明创作题材");
+    return [{ type: "creative", operation: "generate_drafts", theme, style: style || initialContext.artStyle || "storybook" }];
+  }
+  if (!/解锁|取消锁定/.test(normalized) && /锁定|保持|不要改变|不要改/.test(normalized)) {
+    const field = /构图/.test(normalized) ? "composition" : /配色|色板|颜色/.test(normalized) ? "palette"
+      : /光|明暗/.test(normalized) ? "light" : /焦点/.test(normalized) ? "focus" : /氛围|情绪/.test(normalized) ? "atmosphere"
+        : /节奏|风感/.test(normalized) ? "rhythm" : /留白/.test(normalized) ? "negativeSpace" : null;
+    if (field) return [{ type: "creative", operation: "lock", field }];
+    const entityName = (initialContext.entityNames || []).find(name => normalized.includes(name));
+    if (entityName) return [{ type: "creative", operation: "lock", target: entityName }];
+  }
+  if (/解锁|取消锁定/.test(normalized)) {
+    const field = /构图/.test(normalized) ? "composition" : /配色|色板|颜色/.test(normalized) ? "palette"
+      : /光|明暗/.test(normalized) ? "light" : /焦点/.test(normalized) ? "focus" : /氛围|情绪/.test(normalized) ? "atmosphere"
+        : /节奏|风感/.test(normalized) ? "rhythm" : /留白/.test(normalized) ? "negativeSpace" : null;
+    if (field) return [{ type: "creative", operation: "unlock", field }];
+    const entityName = (initialContext.entityNames || []).find(name => normalized.includes(name));
+    if (entityName) return [{ type: "creative", operation: "unlock", target: entityName }];
+  }
+  if (style && /切换|改成|使用|换成/.test(normalized)) return [{ type: "creative", operation: "set_style", style }];
+  if (/更孤独|加强风感|风更强|右侧留白|左侧留白|焦点|氛围|节奏|光线|明暗|留白/.test(normalized)) {
+    return [{ type: "creative", operation: "refine", instruction: normalized }];
+  }
+  return null;
+}
+
 export function parseCommand(text, initialContext = {}) {
   const context = { selected: Boolean(initialContext.selected), composite: false };
   const corrected = fuzzyCorrect(text);
   const normalized = normalizeText(corrected);
+  const creative = parseCreativeCommand(normalized, initialContext);
+  if (creative) {
+    validateActions(creative);
+    return creative;
+  }
   const commonScene = composeCommonScene(normalized, initialContext.entityNames || []);
   if (commonScene) {
     validateActions(commonScene);

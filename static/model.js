@@ -1,11 +1,15 @@
 import { ENTITY_TEMPLATES, emptyScene, validateEntityParams } from "./scene_schema.js";
+import {
+  ART_STYLES, LOCKABLE_FIELDS, applyDraftToEntities, emptyArtState, generateCompositionDrafts,
+  mixCompositionDrafts, refineArtwork, styleDirection, validateArtState
+} from "./art_schema.js";
 
 export const CANVAS = { width: 1000, height: 700 };
 
 export const ALLOWED_ACTIONS = new Set([
   "create", "select", "update", "move", "align", "distribute",
   "duplicate", "delete", "group", "ungroup", "history", "canvas",
-  "export", "help", "status", "entity_create", "entity_update", "scene_update"
+  "export", "help", "status", "entity_create", "entity_update", "scene_update", "creative"
 ]);
 
 const KINDS = new Set(["rect", "circle", "ellipse", "triangle", "star", "line", "arrow", "text"]);
@@ -36,7 +40,8 @@ const ACTION_FIELDS = {
   status: new Set(["type"]),
   entity_create: new Set(["type", "templateId", "name", "role", "x", "y", "width", "height", "rotation", "opacity", "layer", "params"]),
   entity_update: new Set(["type", "target", "changes"]),
-  scene_update: new Set(["type", "changes"])
+  scene_update: new Set(["type", "changes"]),
+  creative: new Set(["type", "operation", "theme", "style", "draftId", "draftIds", "instruction", "target", "field"])
 };
 
 const TYPE_NAMES = {
@@ -66,7 +71,7 @@ function chineseIndex(number) {
 export function initialState() {
   return {
     objects: [], selection: [], background: "#ffffff", counters: {},
-    lastCreated: [], nextId: 1, groups: {}, nextGroupId: 1, scene: emptyScene()
+    lastCreated: [], nextId: 1, groups: {}, nextGroupId: 1, scene: emptyScene(), art: emptyArtState()
   };
 }
 
@@ -234,6 +239,26 @@ function validateAction(action) {
   }
   if (action.type === "scene_update") {
     requireFields(action, "changes"); validateSceneChanges(action.changes); return;
+  }
+  if (action.type === "creative") {
+    requireFields(action, "operation");
+    const operations = new Set(["generate_drafts", "select_draft", "mix_drafts", "refine", "lock", "unlock", "set_style"]);
+    if (!operations.has(action.operation)) throw new Error("创作操作无效");
+    if ("theme" in action) validateProjectString(action.theme, false, 500);
+    if ("style" in action && !ART_STYLES.includes(action.style)) throw new Error("艺术风格无效");
+    if ("draftId" in action) validateProjectString(action.draftId, false, 100);
+    if ("draftIds" in action && (!Array.isArray(action.draftIds) || action.draftIds.length !== 2
+      || action.draftIds.some(id => typeof id !== "string" || !id || id.length > 100))) throw new Error("混合小稿无效");
+    if ("instruction" in action) validateProjectString(action.instruction, false, 500);
+    if ("field" in action && !LOCKABLE_FIELDS.includes(action.field)) throw new Error("锁定字段无效");
+    if ("target" in action) validateTarget(action.target);
+    if (action.operation === "generate_drafts") requireFields(action, "theme", "style");
+    if (action.operation === "select_draft") requireFields(action, "draftId");
+    if (action.operation === "mix_drafts") requireFields(action, "draftIds");
+    if (action.operation === "refine") requireFields(action, "instruction");
+    if (["lock", "unlock"].includes(action.operation) && !("field" in action) && !("target" in action)) throw new Error("锁定目标无效");
+    if (action.operation === "set_style") requireFields(action, "style");
+    return;
   }
   if (action.type === "create") {
     requireFields(action, "kind");
@@ -465,7 +490,45 @@ function applyAction(state, action, context) {
     return;
   }
   if (action.type === "scene_update") {
-    state.scene = { ...state.scene, ...copy(action.changes), style: "storybook" };
+    state.scene = { ...state.scene, ...copy(action.changes), style: state.art.artDirection.style };
+    return;
+  }
+  if (action.type === "creative") {
+    const art = state.art;
+    if (action.operation === "generate_drafts") {
+      const generation = art.drafts.generation + 1;
+      art.intent.narrative = action.theme;
+      art.artDirection = { ...art.artDirection, ...styleDirection(action.style), style: action.style };
+      art.drafts = { items: generateCompositionDrafts(action.theme, action.style, generation), selectedId: null, stage: "drafts", generation };
+    } else if (action.operation === "select_draft") {
+      const draft = art.drafts.items.find(item => item.id === action.draftId);
+      if (!draft) throw new Error("找不到构图小稿");
+      art.drafts.selectedId = draft.id; art.drafts.stage = "canvas";
+      art.intent.focus = draft.focus;
+      art.composition.flow = draft.flow; art.composition.negativeSpace = draft.negativeSpace;
+      applyDraftToEntities(state.objects, draft, art.locks.entities);
+    } else if (action.operation === "mix_drafts") {
+      const drafts = action.draftIds.map(id => art.drafts.items.find(item => item.id === id));
+      if (drafts.some(draft => !draft)) throw new Error("找不到混合小稿");
+      const mixed = mixCompositionDrafts(drafts[0], drafts[1], art.drafts.generation);
+      art.drafts.items = [...art.drafts.items.slice(0, 3), mixed];
+      art.drafts.selectedId = mixed.id; art.drafts.stage = "canvas";
+      art.intent.focus = mixed.focus; art.composition.flow = mixed.flow; art.composition.negativeSpace = mixed.negativeSpace;
+      applyDraftToEntities(state.objects, mixed, art.locks.entities);
+    } else if (action.operation === "refine") {
+      refineArtwork(art, state.objects, action.instruction);
+    } else if (["lock", "unlock"].includes(action.operation)) {
+      const add = action.operation === "lock";
+      if (action.field) art.locks.fields = add
+        ? [...new Set([...art.locks.fields, action.field])] : art.locks.fields.filter(field => field !== action.field);
+      if (action.target) {
+        const ids = requireTargets(state, action.target).filter(object => object.kind === "entity").map(object => object.id);
+        art.locks.entities = add ? [...new Set([...art.locks.entities, ...ids])] : art.locks.entities.filter(id => !ids.includes(id));
+      }
+    } else if (action.operation === "set_style") {
+      art.artDirection = { ...art.artDirection, ...styleDirection(action.style), style: action.style };
+      state.scene.style = action.style;
+    }
     return;
   }
   if (action.type === "move") {
@@ -558,7 +621,7 @@ function applyAction(state, action, context) {
   }
   if (action.type === "canvas") {
     if (action.operation === "clear") {
-      state.objects = []; state.selection = []; state.lastCreated = []; state.groups = {}; state.scene = emptyScene();
+      state.objects = []; state.selection = []; state.lastCreated = []; state.groups = {}; state.scene = emptyScene(); state.art = emptyArtState();
     } else if (action.operation === "background") state.background = action.color;
     else throw new Error("未知画布操作");
     return;
@@ -615,7 +678,7 @@ export class DrawingEngine {
   serializeProject() {
     return {
       format: "listen-paint",
-      version: 2,
+      version: 3,
       state: copy(this.state),
       history: { undo: copy(this.undoStack), redo: copy(this.redoStack) }
     };
@@ -632,11 +695,12 @@ export class DrawingEngine {
 
 function validateState(state) {
   if (!isRecord(state)) throw new Error("工程状态无效");
-  const required = ["objects", "selection", "background", "counters", "lastCreated", "nextId", "groups", "nextGroupId", "scene"];
+  const required = ["objects", "selection", "background", "counters", "lastCreated", "nextId", "groups", "nextGroupId", "scene", "art"];
   if (Object.keys(state).some(key => !required.includes(key)) || required.some(key => !(key in state))) throw new Error("工程状态字段无效");
   if (!Array.isArray(state.objects) || !Array.isArray(state.selection) || !Array.isArray(state.lastCreated)) throw new Error("工程对象结构无效");
   validateColor(state.background, false);
   validateScene(state.scene);
+  validateArtState(state.art);
   if (!isRecord(state.counters) || !isRecord(state.groups) || !Number.isSafeInteger(state.nextId) || state.nextId < 1
     || !Number.isSafeInteger(state.nextGroupId) || state.nextGroupId < 1) throw new Error("工程计数器无效");
   for (const [kind, count] of Object.entries(state.counters)) {
@@ -705,12 +769,17 @@ function validateState(state) {
 }
 
 export function validateProject(project) {
-  if (!isRecord(project) || project.format !== "listen-paint" || ![1, 2].includes(project.version)
+  if (!isRecord(project) || project.format !== "listen-paint" || ![1, 2, 3].includes(project.version)
     || !isRecord(project.history) || !Array.isArray(project.history.undo) || !Array.isArray(project.history.redo)
     || project.history.undo.length > HISTORY_LIMIT || project.history.redo.length > HISTORY_LIMIT
     || Object.keys(project).some(key => !["format", "version", "state", "history"].includes(key))
     || Object.keys(project.history).some(key => !["undo", "redo"].includes(key))) throw new Error("工程格式或版本无效");
-  const migrate = state => project.version === 1 ? { ...copy(state), scene: emptyScene() } : state;
+  const migrate = state => {
+    const migrated = copy(state);
+    if (project.version === 1) migrated.scene = emptyScene();
+    if (project.version < 3) migrated.art = emptyArtState();
+    return migrated;
+  };
   return {
     state: validateState(migrate(project.state)),
     history: {
@@ -721,7 +790,7 @@ export function validateProject(project) {
 }
 
 function validateScene(scene) {
-  if (!isRecord(scene) || scene.style !== "storybook") throw new Error("场景元数据无效");
+  if (!isRecord(scene) || !ART_STYLES.includes(scene.style)) throw new Error("场景元数据无效");
   const fields = new Set(["style", "theme", "mood", "composition", "summary", "ignored"]);
   if (Object.keys(scene).some(key => !fields.has(key))) throw new Error("场景元数据字段无效");
   validateSceneChanges({ theme: scene.theme, mood: scene.mood, composition: scene.composition, summary: scene.summary, ignored: scene.ignored });

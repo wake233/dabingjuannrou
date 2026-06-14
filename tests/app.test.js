@@ -957,13 +957,14 @@ test("SVG 与 PNG 导出触发下载并为 PNG 绘制背景", async () => {
   assert.equal(browser.canvasCalls[1][0], "drawImage");
 });
 
-test("项目导出下载版本 2 可编辑实体数据", () => {
+test("项目导出下载版本 3 可编辑实体与创作状态数据", () => {
   resetApp();
   app.engine.execute([{ type: "entity_create", templateId: "cat", name: "猫", x: 100, y: 100, width: 120, height: 100, params: { direction: "left" } }]);
   app.download("project");
   const projectBlob = browser.downloads.find(item => item.blob?.type === "application/json")?.blob;
   assert.ok(projectBlob);
-  assert.equal(app.saveProjectData().version, 2);
+  assert.equal(app.saveProjectData().version, 3);
+  assert.equal(app.saveProjectData().state.art.artDirection.style, "storybook");
   assert.equal(app.saveProjectData().state.objects[0].params.direction, "left");
 });
 

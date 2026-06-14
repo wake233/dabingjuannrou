@@ -148,7 +148,9 @@ function tryPreviewRender(text) {
   try {
     const actions = parseCommand(text, {
       selected: engine.state.selection.length > 0,
-      entityNames: engine.state.objects.filter(object => object.kind === "entity").map(object => object.name)
+      entityNames: engine.state.objects.filter(object => object.kind === "entity").map(object => object.name),
+      sceneTheme: engine.state.scene.theme, intentNarrative: engine.state.art.intent.narrative,
+      artStyle: engine.state.art.artDirection.style, draftGeneration: engine.state.art.drafts.generation
     });
     // Clone engine state and apply actions to the clone
     const cloneState = JSON.parse(JSON.stringify(engine.state));
@@ -334,7 +336,9 @@ export async function handleCommand(rawText, confidence = 1, metrics = {}) {
   let actions;
   try { actions = parseCommand(rawText, {
     selected: engine.state.selection.length > 0,
-    entityNames: engine.state.objects.filter(object => object.kind === "entity").map(object => object.name)
+    entityNames: engine.state.objects.filter(object => object.kind === "entity").map(object => object.name),
+    sceneTheme: engine.state.scene.theme, intentNarrative: engine.state.art.intent.narrative,
+    artStyle: engine.state.art.artDirection.style, draftGeneration: engine.state.art.drafts.generation
   }); }
   catch (parseError) {
     console.log("[handleCommand] 本地解析失败:", parseError.message);
