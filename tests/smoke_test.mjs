@@ -131,7 +131,7 @@ check("版本 3 工程保留场景、实体和创作状态", () => {
   const project = engine.serializeProject();
   const restored = new model.DrawingEngine();
   restored.loadProject(project);
-  if (project.version !== 3 || restored.state.objects[0].params.direction !== "left" || !restored.state.art) throw new Error("工程恢复失败");
+  if (project.version !== 4 || restored.state.objects[0].params.direction !== "left" || !restored.state.art) throw new Error("工程恢复失败");
 });
 
 check("本地常见场景构图器生成丰富雨中女人画面", () => {

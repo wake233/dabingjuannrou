@@ -2,7 +2,20 @@
   "name": "listen-paint",
   "private": true,
   "type": "module",
+  "version": "4.0.0",
+  "description": "Voice-first local vector drawing application with unified art rendering engine",
   "scripts": {
-    "test": "node --test tests/*.test.js"
-  }
+    "test": "node --test tests/*.test.js",
+    "build": "node build.js",
+    "dev": "node build.js --watch"
+  },
+  "dependencies": {
+    "perfect-freehand": "^1.2.2",
+    "d3-shape": "^3.2.0",
+    "bezier-js": "^6.1.4",
+    "culori": "^4.0.1",
+    "simplex-noise": "^4.0.3",
+    "esbuild": "^0.25.4"
+  },
+  "devDependencies": {}
 }

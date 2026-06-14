@@ -1,0 +1,48 @@
+{
+  "generated": "2026-06-14T09:28:58.199Z",
+  "project": "listen-paint",
+  "version": "4.0.0",
+  "license": "MIT",
+  "dependencies": [
+    {
+      "name": "perfect-freehand",
+      "version": "1.2.2",
+      "license": "MIT",
+      "source": "https://github.com/steveruizok/perfect-freehand",
+      "usage": "Natural pen strokes with pressure and taper simulation",
+      "modification": "Wrapped behind deterministic seed-driven interface; all random effects are seeded"
+    },
+    {
+      "name": "d3-shape",
+      "version": "3.2.0",
+      "license": "ISC",
+      "source": "https://github.com/d3/d3-shape",
+      "usage": "Organic curve, contour and area path generation",
+      "modification": "Curve factory wrappers with coordinate clamping"
+    },
+    {
+      "name": "bezier-js",
+      "version": "6.1.4",
+      "license": "MIT",
+      "source": "https://github.com/Pomax/bezierjs",
+      "usage": "Bezier curve sampling, tangent, offset and intersection",
+      "modification": "Deterministic sampling wrappers with bounded iteration"
+    },
+    {
+      "name": "culori",
+      "version": "4.0.1",
+      "license": "MIT",
+      "source": "https://github.com/Evercoder/culori",
+      "usage": "Perceptual color space palette generation, lightness and warm/cool relationships",
+      "modification": "Seed-driven palette generation; palette caching for stability"
+    },
+    {
+      "name": "simplex-noise",
+      "version": "4.0.3",
+      "license": "MIT",
+      "source": "https://github.com/jwagner/simplex-noise.js",
+      "usage": "Deterministic paper grain, ink texture, material and natural contour perturbation",
+      "modification": "Seeded noise factory with coordinate domain clamping"
+    }
+  ]
+}

@@ -24,7 +24,7 @@ export const ACCEPTANCE_COMMANDS = [
 
 export function createAcceptanceState() {
   return {
-    version: 3,
+    version: 4,
     updatedAt: null,
     environment: { browser: "", os: "", microphone: "", network: "", stt: "", operator: "" },
     session: {
@@ -60,9 +60,12 @@ export function loadAcceptanceState(storage = globalThis.localStorage) {
       return createAcceptanceState();
     }
     if (parsed.version === 2) {
-      return { ...parsed, version: 3, session: createAcceptanceState().session };
+      return { ...parsed, version: 4, session: createAcceptanceState().session };
     }
-    return parsed.version === 3 && parsed.session ? parsed : createAcceptanceState();
+    if (parsed.version === 3) {
+      return { ...parsed, version: 4, session: createAcceptanceState().session };
+    }
+    return parsed.version === 4 && parsed.session ? parsed : createAcceptanceState();
   } catch (_error) {
     return createAcceptanceState();
   }

@@ -1,7 +1,8 @@
 import { ENTITY_TEMPLATES, emptyScene, validateEntityParams } from "./scene_schema.js";
 import {
   ART_STYLES, LOCKABLE_FIELDS, applyDraftToEntities, emptyArtState, generateCompositionDrafts,
-  mixCompositionDrafts, refineArtwork, styleDirection, validateArtState
+  mixCompositionDrafts, refineArtwork, styleDirection, validateArtState,
+  CAMERA_OPTIONS, LIGHTING_OPTIONS, MATERIAL_OPTIONS, DETAIL_OPTIONS, RENDER_PROFILE_DEFAULTS
 } from "./art_schema.js";
 
 export const CANVAS = { width: 1000, height: 700 };
@@ -243,7 +244,7 @@ function validateAction(action) {
   }
   if (action.type === "creative") {
     requireFields(action, "operation");
-    const operations = new Set(["generate_drafts", "select_draft", "mix_drafts", "refine", "lock", "unlock", "set_style", "regenerate_texture"]);
+    const operations = new Set(["generate_drafts", "select_draft", "mix_drafts", "refine", "lock", "unlock", "set_style", "regenerate_texture", "set_render_profile"]);
     if (!operations.has(action.operation)) throw new Error("创作操作无效");
     if ("theme" in action) validateProjectString(action.theme, false, 500);
     if ("style" in action && !ART_STYLES.includes(action.style)) throw new Error("艺术风格无效");
@@ -259,6 +260,12 @@ function validateAction(action) {
     if (action.operation === "refine") requireFields(action, "instruction");
     if (["lock", "unlock"].includes(action.operation) && !("field" in action) && !("target" in action)) throw new Error("锁定目标无效");
     if (action.operation === "set_style") requireFields(action, "style");
+    if (action.operation === "set_render_profile") {
+      if ("camera" in action && !CAMERA_OPTIONS.includes(action.camera)) throw new Error("镜头选项无效");
+      if ("lighting" in action && !LIGHTING_OPTIONS.includes(action.lighting)) throw new Error("光线选项无效");
+      if ("material" in action && !MATERIAL_OPTIONS.includes(action.material)) throw new Error("材质选项无效");
+      if ("detail" in action && !DETAIL_OPTIONS.includes(action.detail)) throw new Error("细节等级无效");
+    }
     return;
   }
   if (action.type === "texture") {
@@ -551,6 +558,19 @@ function applyAction(state, action, context) {
       state.scene.style = action.style;
     } else if (action.operation === "regenerate_texture") {
       art.texture.status = "pending";
+    } else if (action.operation === "set_render_profile") {
+      const profile = art.renderProfile;
+      if ("camera" in action) profile.camera = action.camera;
+      if ("lighting" in action) profile.lighting = action.lighting;
+      if ("material" in action) profile.material = action.material;
+      if ("detail" in action) profile.detail = action.detail;
+      // Generate stable seed from scene content if not explicitly set
+      if (!profile.seed) {
+        const sceneSource = [state.scene.theme, state.scene.mood, JSON.stringify(state.objects.map(object => object.name))].join("|");
+        let h = 0;
+        for (let i = 0; i < sceneSource.length; i++) h = ((h << 5) - h + sceneSource.charCodeAt(i)) | 0;
+        profile.seed = `v4-${Math.abs(h).toString(36)}`;
+      }
     }
     return;
   }
@@ -723,7 +743,7 @@ export class DrawingEngine {
   serializeProject() {
     return {
       format: "listen-paint",
-      version: 3,
+      version: 4,
       state: copy(this.state),
       history: { undo: copy(this.undoStack), redo: copy(this.redoStack) }
     };
@@ -817,7 +837,7 @@ function validateState(state) {
 }
 
 export function validateProject(project) {
-  if (!isRecord(project) || project.format !== "listen-paint" || ![1, 2, 3].includes(project.version)
+  if (!isRecord(project) || project.format !== "listen-paint" || ![1, 2, 3, 4].includes(project.version)
     || !isRecord(project.history) || !Array.isArray(project.history.undo) || !Array.isArray(project.history.redo)
     || project.history.undo.length > HISTORY_LIMIT || project.history.redo.length > HISTORY_LIMIT
     || Object.keys(project).some(key => !["format", "version", "state", "history"].includes(key))
@@ -826,6 +846,16 @@ export function validateProject(project) {
     const migrated = copy(state);
     if (project.version === 1) migrated.scene = emptyScene();
     if (project.version < 3) migrated.art = emptyArtState();
+    if (project.version < 4 && migrated.art) {
+      migrated.art.renderProfile = migrated.art.renderProfile || { ...RENDER_PROFILE_DEFAULTS };
+      // Generate stable default seed from scene content (only if scene has content)
+      if (!migrated.art.renderProfile.seed && (migrated.scene?.theme || migrated.scene?.mood)) {
+        const sceneSource = [migrated.scene?.theme || "", migrated.scene?.mood || ""].join("|");
+        let h = 0;
+        for (let i = 0; i < sceneSource.length; i++) h = ((h << 5) - h + sceneSource.charCodeAt(i)) | 0;
+        migrated.art.renderProfile.seed = `v4-${Math.abs(h).toString(36)}`;
+      }
+    }
     return migrated;
   };
   return {

@@ -67,7 +67,7 @@ test("版本 2 验收数据迁移时保留指令结果并补充会话指标", ()
   storage.setItem(ACCEPTANCE_STORAGE_KEY, JSON.stringify(oldState));
 
   const migrated = loadAcceptanceState(storage);
-  assert.equal(migrated.version, 3);
+  assert.equal(migrated.version, 4);
   assert.equal(migrated.records[0].success, true);
   assert.equal(migrated.session.recoveryAttempts, 0);
 });

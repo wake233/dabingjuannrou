@@ -1,5 +1,18 @@
 export const ART_STYLES = Object.freeze(["storybook", "woodcut", "ink"]);
-export const LOCKABLE_FIELDS = Object.freeze(["composition", "palette", "light", "focus", "atmosphere", "rhythm", "negativeSpace"]);
+export const LOCKABLE_FIELDS = Object.freeze(["composition", "palette", "light", "focus", "atmosphere", "rhythm", "negativeSpace", "camera", "material", "detail"]);
+
+export const CAMERA_OPTIONS = Object.freeze(["wide", "medium", "portrait"]);
+export const LIGHTING_OPTIONS = Object.freeze(["soft-day", "golden-hour", "night", "rain"]);
+export const MATERIAL_OPTIONS = Object.freeze(["paper", "smooth", "carved", "ink-wash"]);
+export const DETAIL_OPTIONS = Object.freeze(["draft", "balanced", "gallery"]);
+
+export const RENDER_PROFILE_DEFAULTS = Object.freeze({
+  seed: "",
+  camera: "medium",
+  lighting: "soft-day",
+  material: "paper",
+  detail: "balanced"
+});
 
 const STYLE_DIRECTIONS = Object.freeze({
   storybook: { palette: ["#355070", "#6d597a", "#b56576", "#e56b6f", "#eaac8b"], lineLanguage: "soft", shapeLanguage: "layered", texturePrompt: "soft paper grain" },
@@ -36,7 +49,8 @@ export function emptyArtState() {
     artDirection: { style: "storybook", palette: [...STYLE_DIRECTIONS.storybook.palette], lineLanguage: "soft", shapeLanguage: "layered", texturePrompt: "soft paper grain" },
     locks: { fields: [], entities: [] },
     drafts: { items: [], selectedId: null, stage: "intent", generation: 0 },
-    texture: { status: "none", prompt: "", model: "", cacheKey: "", mimeType: "", width: 0, height: 0 }
+    texture: { status: "none", prompt: "", model: "", cacheKey: "", mimeType: "", width: 0, height: 0 },
+    renderProfile: { ...RENDER_PROFILE_DEFAULTS }
   };
 }
 
@@ -106,7 +120,7 @@ export function validateDraft(draft) {
 
 export function validateArtState(art) {
   if (!art || typeof art !== "object" || Array.isArray(art)) throw new Error("创作状态无效");
-  const top = ["intent", "composition", "artDirection", "locks", "drafts", "texture"];
+  const top = ["intent", "composition", "artDirection", "locks", "drafts", "texture", "renderProfile"];
   if (Object.keys(art).some(key => !top.includes(key)) || top.some(key => !(key in art))) throw new Error("创作状态字段无效");
   const intentFields = ["narrative", "emotion", "focus", "rhythm", "symbolism"];
   const compositionFields = ["flow", "negativeSpace", "depth", "lightSource", "contrast"];
@@ -134,6 +148,14 @@ export function validateArtState(art) {
     || !["prompt", "model", "cacheKey", "mimeType"].every(key => validateString(art.texture[key], 1000))
     || !Number.isSafeInteger(art.texture.width) || !Number.isSafeInteger(art.texture.height)
     || art.texture.width < 0 || art.texture.height < 0) throw new Error("纹理元数据无效");
+  // Validate renderProfile (v4)
+  const profileFields = ["seed", "camera", "lighting", "material", "detail"];
+  if (!art.renderProfile || Object.keys(art.renderProfile).some(key => !profileFields.includes(key))
+    || !validateString(art.renderProfile.seed, 200)
+    || !CAMERA_OPTIONS.includes(art.renderProfile.camera)
+    || !LIGHTING_OPTIONS.includes(art.renderProfile.lighting)
+    || !MATERIAL_OPTIONS.includes(art.renderProfile.material)
+    || !DETAIL_OPTIONS.includes(art.renderProfile.detail)) throw new Error("渲染画像无效");
   return true;
 }
 

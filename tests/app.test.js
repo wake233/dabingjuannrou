@@ -970,7 +970,7 @@ test("项目导出下载版本 3 可编辑实体与创作状态数据", () => {
   app.download("project");
   const projectBlob = browser.downloads.find(item => item.blob?.type === "application/json")?.blob;
   assert.ok(projectBlob);
-  assert.equal(app.saveProjectData().version, 3);
+  assert.equal(app.saveProjectData().version, 4);
   assert.equal(app.saveProjectData().state.art.artDirection.style, "storybook");
   assert.equal(app.saveProjectData().state.objects[0].params.direction, "left");
 });

@@ -342,7 +342,7 @@ test("工程格式往返恢复完整状态并原子拒绝恶意载荷", () => {
 
   const before = JSON.stringify(restored.serializeProject());
   for (const invalid of [
-    { ...project, version: 4 },
+    { ...project, version: 5 },
     { ...project, state: { ...project.state, objects: [{ ...project.state.objects[0], onclick: "alert(1)" }] } },
     { ...project, state: { ...project.state, selection: ["missing-id"] } },
     { ...project, state: { ...project.state, counters: { rect: -1 } } },
@@ -495,7 +495,7 @@ test("版本 1 工程迁移为空场景且版本 3 完整恢复实体参数", ()
     { type: "entity_create", templateId: "cat", name: "猫", x: 500, y: 300, width: 150, height: 120, params: { direction: "left", color: "#596780" } }
   ]);
   const version2 = migrated.serializeProject();
-  assert.equal(version2.version, 3);
+  assert.equal(version2.version, 4);
   const restored = new DrawingEngine();
   restored.loadProject(version2);
   assert.deepEqual(restored.serializeProject(), version2);

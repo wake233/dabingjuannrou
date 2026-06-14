@@ -13,21 +13,24 @@ function createScene(engine) {
   ]);
 }
 
-test("版本 3 创作状态可从版本 2 安全迁移并完整往返", () => {
+test("版本 4 创作状态可从版本 2/3 安全迁移并完整往返", () => {
   const engine = new DrawingEngine();
   createScene(engine);
-  const version3 = engine.serializeProject();
-  assert.equal(version3.version, 3);
-  validateArtState(version3.state.art);
-  const version2 = structuredClone(version3);
+  const version4 = engine.serializeProject();
+  assert.equal(version4.version, 4);
+  validateArtState(version4.state.art);
+  const version2 = structuredClone(version4);
   version2.version = 2;
   delete version2.state.art;
   version2.history.undo.forEach(state => delete state.art);
   version2.history.redo.forEach(state => delete state.art);
   const restored = new DrawingEngine();
   restored.loadProject(version2);
-  assert.deepEqual(restored.state.art, emptyArtState());
-  assert.deepEqual(new DrawingEngine().loadProject(version3).state, version3.state);
+  // Version 2->4 migration adds renderProfile with auto-seed from scene content
+  const expectedArt = emptyArtState();
+  expectedArt.renderProfile.seed = restored.state.art.renderProfile.seed;
+  assert.deepEqual(restored.state.art, expectedArt);
+  assert.deepEqual(new DrawingEngine().loadProject(version4).state, version4.state);
 });
 
 test("三张小稿在焦点、动线、尺度与负空间上明显不同", () => {
