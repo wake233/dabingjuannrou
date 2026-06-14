@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [html, styles, app, diagnostic] = await Promise.all([
+const [html, styles, app, diagnostic, gallery] = await Promise.all([
   readFile(new URL("../static/index.html", import.meta.url), "utf8"),
   readFile(new URL("../static/styles.css", import.meta.url), "utf8"),
   readFile(new URL("../static/app.js", import.meta.url), "utf8"),
-  readFile(new URL("../static/diagnostic.html", import.meta.url), "utf8")
+  readFile(new URL("../static/diagnostic.html", import.meta.url), "utf8"),
+  readFile(new URL("../static/art-gallery.html", import.meta.url), "utf8")
 ]);
 
 test("现代画室界面保留核心语音与画布接口", () => {
@@ -39,6 +40,17 @@ test("主界面提供绘本场景说明、实体和忽略内容区域", () => {
   assert.match(html, /语义实体/);
   assert.match(html, /忽略内容/);
   assert.match(styles, /\.scene-card/);
+});
+
+test("主界面提供艺术导演台、三稿、锁定与纹理状态", () => {
+  for (const id of ["art-style", "art-stage", "art-focus", "art-locks", "texture-status", "draft-list"]) {
+    assert.match(html, new RegExp(`id="${id}"`), id);
+  }
+});
+
+test("只读艺术作品集页提供三风格浏览器视觉验收入口", () => {
+  assert.match(gallery, /同一语义场景的三种艺术解释/);
+  assert.match(gallery, /art-gallery\.js/);
 });
 
 test("界面包含响应式、键盘焦点与减少动态效果支持", () => {

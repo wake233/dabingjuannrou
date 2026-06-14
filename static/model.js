@@ -520,17 +520,20 @@ function applyAction(state, action, context) {
       const draft = art.drafts.items.find(item => item.id === action.draftId);
       if (!draft) throw new Error("找不到构图小稿");
       art.drafts.selectedId = draft.id; art.drafts.stage = "canvas";
-      art.intent.focus = draft.focus;
-      art.composition.flow = draft.flow; art.composition.negativeSpace = draft.negativeSpace;
-      applyDraftToEntities(state.objects, draft, art.locks.entities);
+      if (!art.locks.fields.includes("focus")) art.intent.focus = draft.focus;
+      if (!art.locks.fields.includes("composition")) art.composition.flow = draft.flow;
+      if (!art.locks.fields.includes("negativeSpace")) art.composition.negativeSpace = draft.negativeSpace;
+      if (!art.locks.fields.includes("composition")) applyDraftToEntities(state.objects, draft, art.locks.entities);
     } else if (action.operation === "mix_drafts") {
       const drafts = action.draftIds.map(id => art.drafts.items.find(item => item.id === id));
       if (drafts.some(draft => !draft)) throw new Error("找不到混合小稿");
       const mixed = mixCompositionDrafts(drafts[0], drafts[1], art.drafts.generation);
       art.drafts.items = [...art.drafts.items.slice(0, 3), mixed];
       art.drafts.selectedId = mixed.id; art.drafts.stage = "canvas";
-      art.intent.focus = mixed.focus; art.composition.flow = mixed.flow; art.composition.negativeSpace = mixed.negativeSpace;
-      applyDraftToEntities(state.objects, mixed, art.locks.entities);
+      if (!art.locks.fields.includes("focus")) art.intent.focus = mixed.focus;
+      if (!art.locks.fields.includes("composition")) art.composition.flow = mixed.flow;
+      if (!art.locks.fields.includes("negativeSpace")) art.composition.negativeSpace = mixed.negativeSpace;
+      if (!art.locks.fields.includes("composition")) applyDraftToEntities(state.objects, mixed, art.locks.entities);
     } else if (action.operation === "refine") {
       refineArtwork(art, state.objects, action.instruction);
     } else if (["lock", "unlock"].includes(action.operation)) {
@@ -542,7 +545,9 @@ function applyAction(state, action, context) {
         art.locks.entities = add ? [...new Set([...art.locks.entities, ...ids])] : art.locks.entities.filter(id => !ids.includes(id));
       }
     } else if (action.operation === "set_style") {
-      art.artDirection = { ...art.artDirection, ...styleDirection(action.style), style: action.style };
+      const direction = styleDirection(action.style);
+      if (art.locks.fields.includes("palette")) direction.palette = art.artDirection.palette;
+      art.artDirection = { ...art.artDirection, ...direction, style: action.style };
       state.scene.style = action.style;
     } else if (action.operation === "regenerate_texture") {
       art.texture.status = "pending";
@@ -621,6 +626,7 @@ function applyAction(state, action, context) {
     state.objects = state.objects.filter(o => !ids.has(o.id));
     state.selection = state.selection.filter(id => !ids.has(id));
     state.lastCreated = state.lastCreated.filter(id => !ids.has(id));
+    state.art.locks.entities = state.art.locks.entities.filter(id => !ids.has(id));
     reconcileGroups(state);
     return;
   }
@@ -769,6 +775,9 @@ function validateState(state) {
     if ((state.counters[kind] || 0) < maxNameIndex) throw new Error("工程图形命名计数器无效");
   }
   for (const value of [...state.selection, ...state.lastCreated]) if (!ids.has(value)) throw new Error("工程对象引用无效");
+  if (state.art.locks.entities.some(id => !ids.has(id) || state.objects.find(object => object.id === id)?.kind !== "entity")) {
+    throw new Error("创作锁定实体引用无效");
+  }
   const groupNames = new Set();
   const groupedMembers = new Set();
   let maxGroupId = 0;

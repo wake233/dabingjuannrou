@@ -450,4 +450,8 @@ test("艺术创作语音可生成选取混合精修锁定并切换风格", () =>
   assert.deepEqual(parseCommand("切换成木刻风格"), [{ type: "creative", operation: "set_style", style: "woodcut" }]);
   assert.deepEqual(parseCommand("重新生成纹理"), [{ type: "creative", operation: "regenerate_texture" }]);
   assert.deepEqual(parseCommand("移除纹理"), [{ type: "texture", operation: "remove" }]);
+  for (const phrase of ["让人物成为焦点", "氛围更孤独", "节奏更舒缓", "光线从右侧照来", "左侧留白更多"]) {
+    assert.equal(parseCommand(phrase)[0].operation, "refine", phrase);
+  }
+  assert.deepEqual(parseCommand("锁定人物", { entityNames: ["人物"] }), [{ type: "creative", operation: "lock", target: "人物" }]);
 });

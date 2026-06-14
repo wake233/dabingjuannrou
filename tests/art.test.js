@@ -113,3 +113,17 @@ test("切换至水墨保留主体可编辑性并应用留白导向", () => {
   engine.execute([{ type: "creative", operation: "generate_drafts", theme: "山路旅人", style: "ink" }]);
   assert.ok(engine.state.art.drafts.items.every(draft => /open/.test(draft.negativeSpace)));
 });
+
+test("跨风格与选稿操作保持已锁定配色、构图和实体", () => {
+  const engine = new DrawingEngine();
+  createScene(engine);
+  engine.execute([{ type: "creative", operation: "generate_drafts", theme: "雨中归人", style: "storybook" }]);
+  engine.execute([{ type: "creative", operation: "lock", field: "palette" },
+    { type: "creative", operation: "lock", field: "composition" }, { type: "creative", operation: "lock", target: "人物" }]);
+  const palette = structuredClone(engine.state.art.artDirection.palette);
+  const objects = structuredClone(engine.state.objects);
+  engine.execute([{ type: "creative", operation: "set_style", style: "ink" }]);
+  engine.execute([{ type: "creative", operation: "select_draft", draftId: "draft-1-3" }]);
+  assert.deepEqual(engine.state.art.artDirection.palette, palette);
+  assert.deepEqual(engine.state.objects, objects);
+});

@@ -204,6 +204,17 @@ export function render() {
     $("ignored-list").innerHTML = engine.state.scene.ignored.length
       ? engine.state.scene.ignored.map(item => `<li>${escapeHtml(item)}</li>`).join("") : "<li>无忽略内容</li>";
   }
+  if ($("art-style")) $("art-style").textContent = ({ storybook: "绘本", woodcut: "木刻", ink: "水墨" })[engine.state.art.artDirection.style];
+  if ($("art-stage")) $("art-stage").textContent = ({ intent: "表达意图", drafts: "选择小稿", canvas: "正式画布", refining: "审美精修", complete: "完成" })[engine.state.art.drafts.stage];
+  if ($("art-focus")) $("art-focus").textContent = engine.state.art.intent.focus ? `焦点：${engine.state.art.intent.focus}` : "尚未设置视觉焦点";
+  if ($("art-locks")) {
+    const locks = [...engine.state.art.locks.fields, ...engine.state.art.locks.entities];
+    $("art-locks").textContent = locks.length ? `已锁定：${locks.join("、")}` : "暂无锁定";
+  }
+  if ($("texture-status")) $("texture-status").textContent = `纹理：${engine.state.art.texture.status}`;
+  if ($("draft-list")) $("draft-list").innerHTML = engine.state.art.drafts.items.length
+    ? engine.state.art.drafts.items.map(draft => `<li>${escapeHtml(draft.label)} · ${escapeHtml(draft.focus)} · ${escapeHtml(draft.negativeSpace)}</li>`).join("")
+    : "<li>说“生成三张绘本构图小稿，雨中归人”</li>";
   updateCanvasControls();
   lastRenderDuration = performance.now() - started;
 }
@@ -289,7 +300,7 @@ export async function llmFallback(text) {
     body: JSON.stringify({ text, context: {
       objects: engine.state.objects.map(({ id, name, kind }) => ({ id, name, kind })),
       entities: entities.map(({ id, name, templateId, params, x, y, width, height }) => ({ id, name, templateId, params, bounds: { x, y, width, height } })),
-      selection: engine.state.selection, scene: engine.state.scene
+      selection: engine.state.selection, scene: engine.state.scene, art: engine.state.art
     } })
   });
   const body = await response.json();

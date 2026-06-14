@@ -142,6 +142,20 @@ check("本地常见场景构图器生成丰富雨中女人画面", () => {
   if (!engine.state.objects.some(object => object.templateId === "puddle")) throw new Error("缺少环境叙事元素");
 });
 
+console.log("\n📋 Art — 三稿、锁定与跨风格");
+
+check("三稿选择、锁定与跨风格保持语义场景", () => {
+  const engine = new model.DrawingEngine();
+  engine.execute(parser.parseCommand("画一个下雨天打伞的女人"));
+  const semantic = engine.state.objects.map(object => object.name).join(",");
+  engine.execute([{ type: "creative", operation: "generate_drafts", theme: "雨中归人", style: "storybook" }]);
+  if (engine.state.art.drafts.items.length !== 3) throw new Error("未生成三张小稿");
+  engine.execute([{ type: "creative", operation: "lock", field: "composition" }]);
+  engine.execute([{ type: "creative", operation: "set_style", style: "ink" }]);
+  if (engine.state.objects.map(object => object.name).join(",") !== semantic) throw new Error("跨风格丢失语义关系");
+  if (engine.state.art.artDirection.style !== "ink") throw new Error("水墨风格未生效");
+});
+
 // ── Results ──
 console.log(`\n${'='.repeat(40)}`);
 console.log(`通过: ${passed}  失败: ${failed}  总计: ${passed + failed}`);
