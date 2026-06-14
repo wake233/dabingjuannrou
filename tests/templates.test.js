@@ -84,3 +84,15 @@ test("木刻渲染器使用高反差块面、有限色板和方向性刻线", ()
   assert.match(rendered.getAttribute("transform"), /scale\(-1 1\)/);
   assert.notEqual(rendered.children.length, renderArtworkEntity(entity, "storybook").children.length);
 });
+
+test("水墨渲染器使用浓淡层次、飞白和受控墨迹并保持实体整体", () => {
+  const entity = { id: "entity-ink", kind: "entity", templateId: "mountain", name: "远山", x: 10, y: 40,
+    width: 600, height: 360, rotation: 0, opacity: 1, params: {} };
+  const rendered = renderArtworkEntity(entity, "ink");
+  assert.equal(rendered.getAttribute("data-id"), "entity-ink");
+  assert.equal(rendered.getAttribute("data-renderer"), "ink");
+  assert.equal(rendered.children.filter(child => child.getAttribute("data-ink-wash")).length, 2);
+  assert.equal(rendered.children.filter(child => child.getAttribute("data-flying-white") === "true").length, 1);
+  assert.equal(rendered.children.filter(child => child.getAttribute("data-ink-speck") === "controlled").length, 4);
+  assert.notEqual(rendered.children.length, renderArtworkEntity(entity, "woodcut").children.length);
+});

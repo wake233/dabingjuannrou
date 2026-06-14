@@ -101,3 +101,15 @@ test("切换至木刻保留语义叙事关系并应用独立艺术指导", () =>
   assert.equal(engine.state.art.artDirection.lineLanguage, "carved");
   assert.equal(engine.state.art.artDirection.palette.length, 3);
 });
+
+test("切换至水墨保留主体可编辑性并应用留白导向", () => {
+  const engine = new DrawingEngine();
+  createScene(engine);
+  const person = engine.state.objects.find(object => object.name === "人物");
+  engine.execute([{ type: "creative", operation: "set_style", style: "ink" }]);
+  engine.execute([{ type: "entity_update", target: "人物", changes: { params: { pose: "walking" } } }]);
+  assert.equal(engine.state.objects.find(object => object.id === person.id).params.pose, "walking");
+  assert.equal(engine.state.art.artDirection.lineLanguage, "calligraphic");
+  engine.execute([{ type: "creative", operation: "generate_drafts", theme: "山路旅人", style: "ink" }]);
+  assert.ok(engine.state.art.drafts.items.every(draft => /open/.test(draft.negativeSpace)));
+});

@@ -1209,3 +1209,18 @@ test("纹理成功会固化到 SVG，失败不阻塞矢量编辑与工程恢复"
   app.loadProjectData(project);
   assert.equal(app.engine.state.objects.length, 1);
 });
+
+test("水墨纹理覆盖层不破坏语义主体可编辑性", async () => {
+  resetApp();
+  app.engine.execute([
+    { type: "entity_create", templateId: "person", name: "人物", x: 300, y: 200, width: 180, height: 360, params: {} },
+    { type: "creative", operation: "set_style", style: "ink" },
+    { type: "texture", operation: "apply", prompt: "ink wash", model: "safe", cacheKey: "texture-app", mimeType: "image/png", width: 1000, height: 700 }
+  ]);
+  await app.restoreArtworkTexture();
+  app.render();
+  const entity = browser.elements["drawing-layer"].children.find(child => child.getAttribute("data-id")?.startsWith("entity-"));
+  assert.equal(entity.getAttribute("data-renderer"), "ink");
+  app.engine.execute([{ type: "move", target: "人物", dx: 30, dy: 0 }]);
+  assert.equal(app.engine.state.objects[0].x, 330);
+});

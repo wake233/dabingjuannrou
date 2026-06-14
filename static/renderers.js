@@ -40,9 +40,30 @@ function woodcutSilhouette(entity) {
   return finish(group, entity, "woodcut");
 }
 
+function inkSilhouette(entity) {
+  const { width: w, height: h, templateId } = entity;
+  const group = node("g", { "data-art-style": "ink", "stroke-linecap": "round", "stroke-linejoin": "round" });
+  const landscape = ["mountain", "river", "grass", "street", "buildings", "cloud"].includes(templateId);
+  group.appendChild(node("ellipse", { cx: w * .48, cy: h * .62, rx: w * .44, ry: h * .31,
+    fill: "#151515", opacity: landscape ? .18 : .3, stroke: "none", "data-ink-wash": "light" }));
+  group.appendChild(node("ellipse", { cx: w * .52, cy: h * .55, rx: w * .3, ry: h * .4,
+    fill: "#151515", opacity: landscape ? .32 : .55, stroke: "none", "data-ink-wash": "dark" }));
+  group.appendChild(node("path", { d: `M${w * .08} ${h * .76} Q${w * .34} ${h * .1} ${w * .55} ${h * .38} T${w * .92} ${h * .2}`,
+    fill: "none", stroke: "#151515", opacity: .8, "stroke-width": Math.max(3, Math.min(w, h) * .026), "data-ink-mark": "gesture" }));
+  group.appendChild(node("path", { d: `M${w * .12} ${h * .88} Q${w * .42} ${h * .68} ${w * .88} ${h * .82}`,
+    fill: "none", stroke: "#151515", opacity: .62, "stroke-width": Math.max(4, Math.min(w, h) * .034),
+    "stroke-dasharray": `${Math.max(4, w * .08)} ${Math.max(3, w * .035)}`, "data-flying-white": "true" }));
+  for (let index = 0; index < 4; index += 1) {
+    group.appendChild(node("circle", { cx: w * (.22 + index * .17), cy: h * (.28 + (index % 2) * .12),
+      r: Math.max(2, Math.min(w, h) * (.012 + index * .004)), fill: "#151515", opacity: .25 + index * .12, "data-ink-speck": "controlled" }));
+  }
+  return finish(group, entity, "ink");
+}
+
 export function renderArtworkEntity(entity, style = "storybook") {
   if (!ART_STYLES.includes(style)) throw new Error("艺术风格无效");
   if (style === "woodcut") return woodcutSilhouette(entity);
+  if (style === "ink") return inkSilhouette(entity);
   const rendered = renderStorybookEntity(entity);
   rendered.setAttribute("data-renderer", style);
   rendered.setAttribute("data-semantic-entity", entity.templateId);
